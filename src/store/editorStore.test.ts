@@ -170,4 +170,33 @@ describe('editor store', () => {
     s().paste();
     expect(s().timeline.clips.filter((c) => c.text)).toHaveLength(2);
   });
+
+  it('detaches audio from a video clip and undoes it', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().detachAudio(id);
+    const audioClip = s().timeline.clips.find((c) => c.audioOnly)!;
+    expect(audioClip).toMatchObject({ start: 0, duration: 4 });
+    expect(s().timeline.tracks.find((t) => t.id === audioClip.trackId)!.kind).toBe('audio');
+    // Copy/paste keeps detached audio on an audio track.
+    s().select(audioClip.id);
+    s().copySelected();
+    useEditor.setState({ currentTime: 4 });
+    s().paste();
+    const pasted = s().timeline.clips.filter((c) => c.audioOnly);
+    expect(pasted.every((c) => s().timeline.tracks.find((t) => t.id === c.trackId)!.kind === 'audio')).toBe(true);
+    s().undo();
+    s().undo();
+    expect(s().timeline.clips).toHaveLength(1);
+    expect(s().timeline.clips[0].audioDetached).toBeUndefined();
+  });
+
+  it('volume and fades are clamped and undoable', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().updateClip(id, { audio: { volume: 9, fadeIn: 3, fadeOut: 3 } });
+    expect(s().timeline.clips[0].audio).toEqual({ volume: 2, fadeIn: 3, fadeOut: 1 });
+    s().undo();
+    expect(s().timeline.clips[0].audio).toEqual({ volume: 1, fadeIn: 0, fadeOut: 0 });
+  });
 });

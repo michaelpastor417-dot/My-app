@@ -13,6 +13,12 @@ export interface MediaAsset {
   height?: number;
   /** Small data-URL preview for the media panel. */
   thumbnail?: string;
+  /**
+   * Loudness envelope for waveforms: peak level (0 to 1) per 1/PEAKS_PER_SECOND
+   * of a second. Filled in after import; absent while decoding, empty when the
+   * file has no sound.
+   */
+  peaks?: number[];
 }
 
 /** Text tracks hold text and sticker clips and always draw above video tracks. */
@@ -81,6 +87,14 @@ export interface TextData {
   animationOut: TextAnimationOut;
 }
 
+export interface ClipAudio {
+  /** 1 is the original level; up to 2 (200%). */
+  volume: number;
+  /** Seconds. */
+  fadeIn: number;
+  fadeOut: number;
+}
+
 /** What fills the canvas where the main-track media doesn't cover it. */
 export type CanvasBackground = { type: 'color'; color: string } | { type: 'blur'; amount: number };
 
@@ -101,6 +115,12 @@ export interface Clip {
   transform: Transform;
   /** Ignored for audio clips. */
   crop: Crop;
+  /** Ignored for text clips. */
+  audio: ClipAudio;
+  /** A video clip whose sound was moved to its own audio clip; it plays silently. */
+  audioDetached?: boolean;
+  /** An audio clip that plays the sound of a video asset (made by detaching audio). */
+  audioOnly?: boolean;
 }
 
 export interface Timeline {

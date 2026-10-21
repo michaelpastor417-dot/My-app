@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip, Track } from '../types';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
+import { DEFAULT_AUDIO } from '../engine/audio';
 import {
   MIN_CLIP_DURATION,
   addTrack,
   clipsAt,
   clipsOnTrack,
   createTimeline,
+  detachAudio,
   duplicateClip,
   findFreeStart,
   insertClip,
@@ -28,6 +30,7 @@ const clip = (id: string, duration: number, trackId = 'main', start = 0): Clip =
   duration,
   transform: DEFAULT_TRANSFORM,
   crop: NO_CROP,
+  audio: DEFAULT_AUDIO,
 });
 
 const overlay: Track = { id: 'ov', kind: 'video', isMain: false, muted: false, hidden: false, locked: false };
@@ -232,5 +235,31 @@ describe('track layering', () => {
     let t = addTrack(addTrack(createTimeline(), text), overlay);
     t = insertClip(t, clip('words', 2, 'tx'), 0);
     expect(moveClip(t, 'words', 0, 'ov')).toBe(t);
+  });
+});
+
+describe('audio', () => {
+  it('splitting keeps the fade in on the left half and the fade out on the right', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), audio: { volume: 1, fadeIn: 1, fadeOut: 1 } });
+    t = splitClip(t, 'a', 2, 'b');
+    const [a, b] = clipsOnTrack(t, 'main');
+    expect(a.audio).toEqual({ volume: 1, fadeIn: 1, fadeOut: 0 });
+    expect(b.audio).toEqual({ volume: 1, fadeIn: 0, fadeOut: 1 });
+  });
+
+  it('trimming shortens fades that no longer fit', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), audio: { volume: 1, fadeIn: 3, fadeOut: 0 } });
+    t = trimClip(t, 'a', 'end', 2, 10);
+    expect(clipsOnTrack(t, 'main')[0].audio.fadeIn).toBe(2);
+  });
+
+  it('detaches a video clip\'s sound onto a lined-up audio clip', () => {
+    let t = insertClip(createTimeline(), clip('a', 2));
+    t = insertClip(t, { ...clip('v', 3), inPoint: 1 });
+    t = detachAudio(t, 'v', 'v-audio', audio);
+    expect(clipsOnTrack(t, 'main')[1]).toMatchObject({ id: 'v', audioDetached: true });
+    expect(clipsOnTrack(t, 'au')[0]).toMatchObject({ id: 'v-audio', start: 2, inPoint: 1, duration: 3, audioOnly: true });
+    // Detaching twice does nothing.
+    expect(detachAudio(t, 'v', 'again', { ...audio, id: 'au2' })).toBe(t);
   });
 });

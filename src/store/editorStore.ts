@@ -3,26 +3,28 @@ import type { CanvasBackground, Clip, MediaAsset, TextData, Timeline, Track, Tra
 import { BASE_TEXT, DEFAULT_TEXT_DURATION } from '../engine/text';
 import { STICKER_TEXT, TEXT_PRESETS } from '../timeline/textPresets';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
+import { DEFAULT_AUDIO } from '../engine/audio';
 import {
   DEFAULT_IMAGE_DURATION,
   addTrack,
   clipsAt,
   clipsOnTrack,
   createTimeline,
+  detachAudio,
   duplicateClip,
   findFreeStart,
   getTrack,
   insertClip,
   moveClip,
   pruneEmptyTracks,
-  type ClipVisualPatch,
+  type ClipPropsPatch,
   removeClip,
   setBackground,
   splitClip,
   timelineDuration,
   trimClip,
   updateClipText,
-  updateClipVisual,
+  updateClipProps,
   updateTrack,
 } from '../timeline/model';
 import { uid } from '../utils/id';
@@ -61,6 +63,10 @@ interface EditorState {
   gestureBase: Timeline | null;
 
   addAssets: (assets: MediaAsset[]) => void;
+  /** Fill in details found after import, such as the waveform. Not part of undo history. */
+  updateAsset: (assetId: string, patch: Partial<MediaAsset>) => void;
+  /** Move a video clip's sound onto its own audio clip (CapCut's "Extract audio"). */
+  detachAudio: (clipId: string) => void;
   /**
    * Put an asset on the timeline. With no `trackId`, visual media goes on the
    * main track and audio on a new audio track. `trackId: 'new'` always makes a new track.
@@ -80,9 +86,9 @@ interface EditorState {
    * Edit a clip's transform/crop as an undoable step. Consecutive edits with
    * the same `coalesceKey` (e.g. one slider being dragged) merge into one step.
    */
-  updateClip: (clipId: string, patch: ClipVisualPatch, coalesceKey?: string) => void;
+  updateClip: (clipId: string, patch: ClipPropsPatch, coalesceKey?: string) => void;
   /** Edit a clip's transform/crop during a gesture started with `beginGesture`. */
-  updateClipLive: (clipId: string, patch: ClipVisualPatch) => void;
+  updateClipLive: (clipId: string, patch: ClipPropsPatch) => void;
   setBackground: (background: CanvasBackground, coalesceKey?: string) => void;
 
   /** Begin a live edit (e.g. a trim drag); updates (e.g. `trimGesture`) undo as one step. */
@@ -169,8 +175,9 @@ export const useEditor = create<EditorState>((set, get) => {
     return get().assets.find((a) => a.id === clip.assetId);
   }
 
-  function trackKindOf(clip: Pick<Clip, 'text' | 'assetId'>): TrackKind {
+  function trackKindOf(clip: Pick<Clip, 'text' | 'assetId' | 'audioOnly'>): TrackKind {
     if (clip.text) return 'text';
+    if (clip.audioOnly) return 'audio';
     return assetFor(clip as Clip)?.kind === 'audio' ? 'audio' : 'video';
   }
 
@@ -207,11 +214,24 @@ export const useEditor = create<EditorState>((set, get) => {
 
     addAssets: (assets) => set((s) => ({ assets: [...s.assets, ...assets] })),
 
+    updateAsset: (assetId, patch) =>
+      set((s) => ({ assets: s.assets.map((a) => (a.id === assetId ? { ...a, ...patch } : a)) })),
+
+    detachAudio: (clipId) => {
+      const { timeline } = get();
+      const clip = timeline.clips.find((c) => c.id === clipId);
+      if (!clip || isClipLocked(timeline, clip)) return;
+      commit(detachAudio(timeline, clipId, uid(), newTrack('audio')));
+    },
+
     addToTimeline: (assetId, opts = {}) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset) return;
       const duration = asset.kind === 'image' ? DEFAULT_IMAGE_DURATION : asset.duration;
-      place({ id: uid(), assetId, inPoint: 0, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP }, opts);
+      place(
+        { id: uid(), assetId, inPoint: 0, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP, audio: DEFAULT_AUDIO },
+        opts,
+      );
     },
 
     addText: (source, opts = {}) => {
@@ -221,7 +241,10 @@ export const useEditor = create<EditorState>((set, get) => {
           ? { ...BASE_TEXT, ...STICKER_TEXT, content: source.sticker }
           : { ...BASE_TEXT, ...preset?.text };
       const transform = { ...DEFAULT_TRANSFORM, ...preset?.transform };
-      place({ id: uid(), text, inPoint: 0, duration: DEFAULT_TEXT_DURATION, transform, crop: NO_CROP }, opts);
+      place(
+        { id: uid(), text, inPoint: 0, duration: DEFAULT_TEXT_DURATION, transform, crop: NO_CROP, audio: DEFAULT_AUDIO },
+        opts,
+      );
     },
 
     updateText: (clipId, patch, coalesceKey) => {
@@ -289,14 +312,14 @@ export const useEditor = create<EditorState>((set, get) => {
       const { timeline } = get();
       const clip = timeline.clips.find((c) => c.id === clipId);
       if (!clip || isClipLocked(timeline, clip)) return;
-      commit(updateClipVisual(timeline, clipId, patch), {}, coalesceKey && `${clipId}:${coalesceKey}`);
+      commit(updateClipProps(timeline, clipId, patch), {}, coalesceKey && `${clipId}:${coalesceKey}`);
     },
 
     updateClipLive: (clipId, patch) => {
       const { timeline, gestureBase } = get();
       const clip = timeline.clips.find((c) => c.id === clipId);
       if (!gestureBase || !clip || isClipLocked(timeline, clip)) return;
-      set({ timeline: updateClipVisual(timeline, clipId, patch) });
+      set({ timeline: updateClipProps(timeline, clipId, patch) });
     },
 
     setBackground: (background, coalesceKey) =>

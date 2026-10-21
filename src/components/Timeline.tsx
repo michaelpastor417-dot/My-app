@@ -3,6 +3,8 @@ import { MAX_ZOOM, MIN_ZOOM, isClipLocked, useEditor } from '../store/editorStor
 import { clipEnd, timelineDuration } from '../timeline/model';
 import { formatTime } from '../utils/time';
 import { trackDrag } from '../utils/drag';
+import { Waveform } from './Waveform';
+import { VoiceoverButton } from './VoiceoverButton';
 import { ASSET_DRAG_TYPE, TEXT_DRAG_TYPE } from './MediaPanel';
 import type { Clip, MediaAsset, Track } from '../types';
 
@@ -225,6 +227,8 @@ export function Timeline() {
         <button className="tool-btn" onClick={duplicateSelected} disabled={selectedLocked} title="Duplicate (Ctrl+D)">
           ⧉ Duplicate
         </button>
+        <div className="toolbar-divider" />
+        <VoiceoverButton />
         <div className="toolbar-spacer" />
         <label className="zoom-control" title="Zoom (Ctrl + scroll)">
           <span>−</span>
@@ -383,16 +387,20 @@ function TrackRow(props: {
           const asset = props.assets.find((a) => a.id === clip.assetId);
           const dragging = drag?.clipId === clip.id && drag.moved;
           const selected = props.selectedClipId === clip.id;
+          const soundOnly = clip.audioOnly || asset?.kind === 'audio';
+          const width = Math.max(4, clip.duration * zoom);
+          // Audio clips show a full-height waveform; video clips a strip along the bottom unless detached.
+          const waveHeight = soundOnly ? 30 : 14;
+          const showWave = !!asset?.peaks?.length && !clip.audioDetached;
+          const kindClass = clip.text ? 'text' : soundOnly ? 'audio' : (asset?.kind ?? '');
           return (
             <div
               key={clip.id}
-              className={`clip ${clip.text ? 'text' : (asset?.kind ?? '')} ${selected ? 'selected' : ''} ${
-                dragging ? 'dragging' : ''
-              }`}
+              className={`clip ${kindClass} ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''}`}
               style={{
                 left: clip.start * zoom,
-                width: Math.max(4, clip.duration * zoom),
-                backgroundImage: asset?.thumbnail ? `url(${asset.thumbnail})` : undefined,
+                width,
+                backgroundImage: asset?.thumbnail && !soundOnly ? `url(${asset.thumbnail})` : undefined,
                 transform: dragging ? `translate(${drag.dx}px, ${drag.dy}px)` : undefined,
               }}
               onPointerDown={(e) => props.onClipPointerDown(e, clip)}
@@ -400,8 +408,21 @@ function TrackRow(props: {
               onPointerUp={props.onClipPointerUp}
               onPointerCancel={props.onClipPointerUp}
             >
+              {showWave && (
+                <div className={`clip-wave ${soundOnly ? 'full' : 'strip'}`}>
+                  <Waveform
+                    peaks={asset.peaks!}
+                    from={clip.inPoint}
+                    to={clip.inPoint + clip.duration}
+                    width={width}
+                    height={waveHeight}
+                  />
+                </div>
+              )}
               <span className="clip-label">
+                {clip.audioDetached && <span title="Audio detached">🔇 </span>}
                 {clip.text ? clip.text.content.split('\n')[0] || 'Text' : asset?.name} · {formatTime(clip.duration)}
+                {!clip.text && !clip.audioDetached && clip.audio.volume !== 1 && ` · ${Math.round(clip.audio.volume * 100)}%`}
               </span>
               {selected && !track.locked && !dragging && (
                 <>

@@ -1,6 +1,7 @@
 import type { Clip, MediaAsset, Timeline } from '../types';
 import { clipsAt, timelineDuration } from '../timeline/model';
 import { clipRect, cropRect } from './geometry';
+import { clipGain } from './audio';
 import { animateText, layoutText, measureWithCanvas, paintText, revealLines } from './text';
 import { useEditor } from '../store/editorStore';
 
@@ -10,6 +11,8 @@ const PLAYING_DRIFT_TOLERANCE = 0.15;
 const PAUSED_DRIFT_TOLERANCE = 1 / 60;
 /** How far ahead (seconds) to start seeking an upcoming clip's media to its in point. */
 const PRE_ROLL = 1;
+/** Time constant (seconds) for volume changes, so per-frame updates don't click. */
+const GAIN_SMOOTHING = 0.015;
 /** Blur radius at background blur amount 1, as a fraction of the canvas's longer side. */
 const BLUR_RADIUS_FRACTION = 0.06;
 
@@ -26,6 +29,12 @@ export class PlaybackEngine {
   private ctx: CanvasRenderingContext2D;
   /** One media element per clip, so the same asset can appear in two places at once. */
   private elements = new Map<string, MediaEl>();
+  /**
+   * Every clip's sound is routed element -> GainNode -> speakers, so volume can
+   * go above 100% and fades are smooth. Created lazily with the first media clip.
+   */
+  private audioCtx: AudioContext | null = null;
+  private gains = new Map<string, GainNode>();
   private rafId = 0;
   private lastTick = 0;
   private unsubscribe: () => void;
@@ -33,7 +42,11 @@ export class PlaybackEngine {
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
     this.unsubscribe = useEditor.subscribe((s, prev) => {
-      if (s.isPlaying !== prev.isPlaying) this.lastTick = performance.now();
+      if (s.isPlaying !== prev.isPlaying) {
+        this.lastTick = performance.now();
+        // Browsers keep audio suspended until a user gesture; pressing play is one.
+        if (s.isPlaying) void this.audioCtx?.resume();
+      }
       if (s.timeline !== prev.timeline || s.assets !== prev.assets) this.syncElementPool();
     });
     this.syncElementPool();
@@ -43,8 +56,8 @@ export class PlaybackEngine {
   destroy() {
     cancelAnimationFrame(this.rafId);
     this.unsubscribe();
-    for (const el of this.elements.values()) this.disposeElement(el);
-    this.elements.clear();
+    for (const clipId of this.elements.keys()) this.disposeClip(clipId);
+    void this.audioCtx?.close();
   }
 
   private frame = (now: number) => {
@@ -71,38 +84,49 @@ export class PlaybackEngine {
   private syncElementPool() {
     const { timeline, assets } = useEditor.getState();
     const live = new Set(timeline.clips.map((c) => c.id));
-    for (const [clipId, el] of this.elements) {
-      if (!live.has(clipId)) {
-        this.disposeElement(el);
-        this.elements.delete(clipId);
-      }
+    for (const clipId of [...this.elements.keys()]) {
+      if (!live.has(clipId)) this.disposeClip(clipId);
     }
     for (const clip of timeline.clips) {
       if (!clip.assetId || this.elements.has(clip.id)) continue;
       const asset = assets.find((a) => a.id === clip.assetId);
-      if (asset) this.elements.set(clip.id, this.createElement(asset));
+      if (asset) this.elements.set(clip.id, this.createElement(clip, asset));
     }
   }
 
-  private createElement(asset: MediaAsset): MediaEl {
+  private createElement(clip: Clip, asset: MediaAsset): MediaEl {
     if (asset.kind === 'image') {
       const img = new Image();
       img.src = asset.url;
       return img;
     }
-    const el = document.createElement(asset.kind === 'video' ? 'video' : 'audio');
+    // Detached audio only needs the sound, so skip decoding the video frames.
+    const el = document.createElement(asset.kind === 'video' && !clip.audioOnly ? 'video' : 'audio');
     el.preload = 'auto';
     el.src = asset.url;
     if (el instanceof HTMLVideoElement) el.playsInline = true;
+    this.connectAudio(clip.id, el);
     return el;
   }
 
-  private disposeElement(el: MediaEl) {
+  private connectAudio(clipId: string, el: HTMLMediaElement) {
+    this.audioCtx ??= new AudioContext();
+    const gain = this.audioCtx.createGain();
+    gain.gain.value = 0;
+    this.audioCtx.createMediaElementSource(el).connect(gain).connect(this.audioCtx.destination);
+    this.gains.set(clipId, gain);
+  }
+
+  private disposeClip(clipId: string) {
+    const el = this.elements.get(clipId);
     if (el instanceof HTMLMediaElement) {
       el.pause();
       el.removeAttribute('src');
       el.load();
     }
+    this.gains.get(clipId)?.disconnect();
+    this.gains.delete(clipId);
+    this.elements.delete(clipId);
   }
 
   private syncMedia(timeline: Timeline, active: Clip[], t: number, playing: boolean) {
@@ -122,7 +146,11 @@ export class PlaybackEngine {
       }
 
       const track = timeline.tracks.find((tr) => tr.id === clip.trackId);
-      el.muted = !!track?.muted;
+      const gain = this.gains.get(clip.id);
+      if (gain && this.audioCtx) {
+        const target = track?.muted ? 0 : clipGain(clip, t);
+        gain.gain.setTargetAtTime(target, this.audioCtx.currentTime, GAIN_SMOOTHING);
+      }
       const target = clip.inPoint + (t - clip.start);
       const drift = Math.abs(el.currentTime - target);
 

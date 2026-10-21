@@ -1,5 +1,6 @@
 import type { MediaAsset, MediaKind } from '../types';
 import { uid } from './id';
+import { computePeaks } from '../engine/audio';
 
 const THUMB_WIDTH = 160;
 
@@ -51,7 +52,9 @@ async function probeAudio(url: string) {
   audio.preload = 'metadata';
   audio.src = url;
   await once(audio, 'loadedmetadata');
-  return { duration: audio.duration };
+  // Browser recordings (e.g. voiceovers) often report an infinite duration; decode to measure them.
+  const duration = Number.isFinite(audio.duration) ? audio.duration : (await decode(url)).duration;
+  return { duration };
 }
 
 /** Read a user file into a MediaAsset, or null if the file type isn't supported. */
@@ -67,4 +70,24 @@ export async function importFile(file: File): Promise<MediaAsset | null> {
     URL.revokeObjectURL(url);
     return null;
   }
+}
+
+/**
+ * Decode an asset's sound into waveform peaks. Resolves to an empty list when
+ * the file has no audio track or the browser can't decode it.
+ */
+export async function loadPeaks(url: string): Promise<number[]> {
+  try {
+    const audio = await decode(url);
+    const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
+    return computePeaks(channels, audio.sampleRate);
+  } catch {
+    return [];
+  }
+}
+
+async function decode(url: string): Promise<AudioBuffer> {
+  const data = await (await fetch(url)).arrayBuffer();
+  // An offline context can decode without a user gesture and never plays anything.
+  return new OfflineAudioContext(1, 1, 44100).decodeAudioData(data);
 }

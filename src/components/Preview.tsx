@@ -20,6 +20,8 @@ export function Preview() {
 
   useEffect(() => {
     const engine = new PlaybackEngine(canvasRef.current!);
+    // Exposed in development so browser tests can inspect playback state.
+    if (import.meta.env.DEV) Object.assign(window, { __engine: engine, __editor: useEditor });
     return () => engine.destroy();
   }, []);
 

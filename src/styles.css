@@ -430,6 +430,11 @@ select {
   font-size: 12px;
   font-weight: 600;
 }
+.section-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 .link-btn {
   background: none;
   border: none;
@@ -445,7 +450,7 @@ select {
   font-size: 12px;
 }
 .slider-field {
-  grid-template-columns: 52px minmax(0, 1fr) 64px;
+  grid-template-columns: 58px minmax(0, 1fr) 64px;
 }
 .slider-field input[type='range'] {
   width: 100%;
@@ -557,6 +562,9 @@ select {
   color: var(--muted);
   font-size: 12px;
 }
+.library-hint-below {
+  margin: 10px 0 0;
+}
 .text-preset-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -616,6 +624,14 @@ select {
 }
 .toolbar-spacer {
   flex: 1;
+}
+.tool-btn.recording {
+  color: #ff5a5a;
+  font-variant-numeric: tabular-nums;
+}
+.toolbar-error {
+  color: #ff7b7b;
+  font-size: 12px;
 }
 .toolbar-divider {
   width: 1px;
@@ -811,6 +827,24 @@ select {
 }
 .trim-handle.end {
   right: 0;
+}
+.clip-wave {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.clip-wave.full {
+  bottom: 2px;
+}
+.clip-wave.strip {
+  bottom: 0;
+  height: 14px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.waveform {
+  display: block;
+  width: 100%;
 }
 .clip-label {
   position: absolute;

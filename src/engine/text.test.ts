@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BASE_TEXT, animateText, fontPx, layoutText, revealLines } from './text';
 import { DEFAULT_TRANSFORM, NO_CROP } from './geometry';
+import { DEFAULT_AUDIO } from './audio';
 import type { Clip, TextData } from '../types';
 
 /** Fake measurer: every character is half the font size wide. */
@@ -9,7 +10,7 @@ const measure = (s: string, font: string) => {
   return s.length * px * 0.5;
 };
 
-const clip: Clip = { id: 't', trackId: 'tx', start: 10, inPoint: 0, duration: 3, transform: DEFAULT_TRANSFORM, crop: NO_CROP };
+const clip: Clip = { id: 't', trackId: 'tx', start: 10, inPoint: 0, duration: 3, transform: DEFAULT_TRANSFORM, crop: NO_CROP, audio: DEFAULT_AUDIO };
 const text = (patch: Partial<TextData>): TextData => ({ ...BASE_TEXT, ...patch });
 
 describe('fontPx', () => {

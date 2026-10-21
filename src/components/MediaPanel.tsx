@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import { useEditor } from '../store/editorStore';
-import { importFile } from '../utils/media';
+import { importFile, loadPeaks } from '../utils/media';
 import { formatTime } from '../utils/time';
-import type { MediaAsset } from '../types';
+import type { MediaAsset, MediaKind } from '../types';
 import { BASE_TEXT } from '../engine/text';
 import { STICKERS, TEXT_PRESETS } from '../timeline/textPresets';
 
@@ -12,7 +12,7 @@ export const TEXT_DRAG_TYPE = 'application/x-clipforge-text';
 
 const TABS = ['Media', 'Audio', 'Text', 'Stickers', 'Effects', 'Transitions', 'Filters'] as const;
 type Tab = (typeof TABS)[number];
-const READY_TABS: Tab[] = ['Media', 'Text', 'Stickers'];
+const READY_TABS: Tab[] = ['Media', 'Audio', 'Text', 'Stickers'];
 
 export function MediaPanel() {
   const [tab, setTab] = useState<Tab>('Media');
@@ -31,7 +31,13 @@ export function MediaPanel() {
           </button>
         ))}
       </nav>
-      {tab === 'Media' && <MediaLibrary />}
+      {tab === 'Media' && <MediaLibrary kinds={['video', 'image', 'audio']} />}
+      {tab === 'Audio' && (
+        <MediaLibrary
+          kinds={['audio']}
+          hint="Music and sound effects you import appear here. Use 🎙 Record on the timeline for voiceovers."
+        />
+      )}
       {tab === 'Text' && <TextLibrary />}
       {tab === 'Stickers' && <StickerLibrary />}
     </aside>
@@ -100,9 +106,11 @@ function StickerLibrary() {
   );
 }
 
-function MediaLibrary() {
-  const assets = useEditor((s) => s.assets);
+function MediaLibrary({ kinds, hint }: { kinds: MediaKind[]; hint?: string }) {
+  const allAssets = useEditor((s) => s.assets);
+  const assets = allAssets.filter((a) => kinds.includes(a.kind));
   const addAssets = useEditor((s) => s.addAssets);
+  const updateAsset = useEditor((s) => s.updateAsset);
   const inputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -117,6 +125,10 @@ function MediaLibrary() {
     setImporting((n) => n - list.length);
     const ok = results.filter((a): a is MediaAsset => a !== null);
     addAssets(ok);
+    // Waveforms decode in the background; clips show them once ready.
+    for (const asset of ok) {
+      if (asset.kind !== 'image') loadPeaks(asset.url).then((peaks) => updateAsset(asset.id, { peaks }));
+    }
     const failed = list.length - ok.length;
     if (failed > 0) setError(`${failed} file${failed > 1 ? 's' : ''} couldn't be imported (unsupported format).`);
   }
@@ -140,13 +152,13 @@ function MediaLibrary() {
       <button className="import-btn" onClick={() => inputRef.current?.click()}>
         <span className="import-plus">+</span>
         <span>Import</span>
-        <small>or drop video, image & audio files here</small>
+        <small>or drop {kinds.length === 1 ? 'audio' : 'video, image & audio'} files here</small>
       </button>
       <input
         ref={inputRef}
         type="file"
         multiple
-        accept="video/*,image/*,audio/*"
+        accept={kinds.map((k) => `${k}/*`).join(',')}
         hidden
         onChange={(e) => {
           if (e.target.files) handleFiles(e.target.files);
@@ -154,6 +166,7 @@ function MediaLibrary() {
         }}
       />
 
+      {hint && <p className="library-hint library-hint-below">{hint}</p>}
       {importing > 0 && <div className="media-status">Importing {importing} file(s)…</div>}
       {error && <div className="media-status error">{error}</div>}
 

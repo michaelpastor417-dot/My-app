@@ -1,8 +1,9 @@
 import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import { formatTime } from '../utils/time';
-import type { CanvasBackground, Clip, Crop, TextAnimationIn, TextAnimationOut, TextData } from '../types';
+import type { CanvasBackground, Clip, ClipAudio, Crop, MediaAsset, TextAnimationIn, TextAnimationOut, TextData } from '../types';
 import { FONT_FAMILIES } from '../engine/text';
+import { MAX_VOLUME } from '../engine/audio';
 import { TEXT_INPUT_ID } from './TransformOverlay';
 
 type TextProps = { clip: Clip; text: TextData };
@@ -210,7 +211,7 @@ export function Inspector() {
               <dt>Name</dt>
               <dd title={asset.name}>{asset.name}</dd>
               <dt>Track</dt>
-              <dd>{track?.isMain ? 'Main track' : `${track?.kind} overlay`}</dd>
+              <dd>{track?.isMain ? 'Main track' : track?.kind === 'audio' ? 'Audio track' : 'Overlay'}</dd>
               <dt>Start</dt>
               <dd>{formatTime(clip.start, true)}</dd>
               <dt>Duration</dt>
@@ -225,16 +226,79 @@ export function Inspector() {
               )}
             </dl>
             {locked && <p className="empty-hint">This clip's track is locked.</p>}
-            {asset.kind !== 'audio' && (
-              <fieldset disabled={locked}>
-                <TransformSection clip={clip} />
-                <CropSection clip={clip} />
-              </fieldset>
-            )}
+            <fieldset disabled={locked}>
+              <AudioSection clip={clip} asset={asset} />
+              {asset.kind !== 'audio' && !clip.audioOnly && (
+                <>
+                  <TransformSection clip={clip} />
+                  <CropSection clip={clip} />
+                </>
+              )}
+            </fieldset>
           </>
         )}
       </div>
     </aside>
+  );
+}
+
+/** Rounds to one decimal place for display in the fade fields. */
+const tenths = (v: number) => Math.round(v * 10) / 10;
+
+function AudioSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
+  const updateClip = useEditor((s) => s.updateClip);
+  const detachAudio = useEditor((s) => s.detachAudio);
+  if (asset.kind === 'image') return null;
+  const decoding = asset.peaks === undefined;
+  const silent = asset.peaks?.length === 0;
+  const set = (key: string, audio: Partial<ClipAudio>) => updateClip(clip.id, { audio }, key);
+  const maxFade = tenths(Math.min(10, clip.duration));
+
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Audio</h4>
+        {asset.kind === 'video' && !clip.audioOnly && !clip.audioDetached && !silent && (
+          <button className="link-btn" onClick={() => detachAudio(clip.id)} disabled={decoding}>
+            Detach audio
+          </button>
+        )}
+      </header>
+      {clip.audioDetached ? (
+        <p className="section-note">The sound plays from its own clip on an audio track.</p>
+      ) : silent ? (
+        <p className="section-note">This clip has no sound.</p>
+      ) : (
+        <>
+          <SliderField
+            label="Volume"
+            unit="%"
+            min={0}
+            max={MAX_VOLUME * 100}
+            value={Math.round(clip.audio.volume * 100)}
+            onChange={(v) => set('volume', { volume: v / 100 })}
+          />
+          <SliderField
+            label="Fade in"
+            unit="s"
+            min={0}
+            max={maxFade}
+            step={0.1}
+            value={tenths(clip.audio.fadeIn)}
+            onChange={(v) => set('fade-in', { fadeIn: v })}
+          />
+          <SliderField
+            label="Fade out"
+            unit="s"
+            min={0}
+            max={maxFade}
+            step={0.1}
+            value={tenths(clip.audio.fadeOut)}
+            onChange={(v) => set('fade-out', { fadeOut: v })}
+          />
+        </>
+      )}
+    </section>
   );
 }
 
@@ -378,6 +442,7 @@ function SliderField(props: {
   unit: string;
   min: number;
   max: number;
+  step?: number;
   value: number;
   onChange: (value: number) => void;
 }) {
@@ -388,12 +453,14 @@ function SliderField(props: {
         type="range"
         min={props.min}
         max={props.max}
+        step={props.step}
         value={props.value}
         onChange={(e) => props.onChange(Number(e.target.value))}
       />
       <span className="field-value">
         <input
           type="number"
+          step={props.step}
           value={props.value}
           onChange={(e) => e.target.value !== '' && props.onChange(Number(e.target.value))}
         />

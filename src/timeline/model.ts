@@ -1,5 +1,6 @@
-import type { CanvasBackground, Clip, Crop, TextData, Timeline, Track, Transform } from '../types';
-import { clampCrop } from '../engine/geometry';
+import type { CanvasBackground, Clip, ClipAudio, Crop, TextData, Timeline, Track, Transform } from '../types';
+import { DEFAULT_TRANSFORM, NO_CROP, clampCrop } from '../engine/geometry';
+import { clampAudio } from '../engine/audio';
 
 /**
  * Pure timeline operations. Every function returns a new Timeline and never
@@ -161,13 +162,15 @@ export function splitClip(timeline: Timeline, clipId: string, t: number, newId: 
     return timeline;
   }
   const leftDuration = t - clip.start;
-  const left: Clip = { ...clip, duration: leftDuration };
+  // Fades belong to the clip's outer edges: the left half keeps the fade in, the right the fade out.
+  const left: Clip = { ...clip, duration: leftDuration, audio: clampAudio({ ...clip.audio, fadeOut: 0 }, leftDuration) };
   const right: Clip = {
     ...clip,
     id: newId,
     start: t,
     inPoint: clip.inPoint + leftDuration,
     duration: clip.duration - leftDuration,
+    audio: clampAudio({ ...clip.audio, fadeIn: 0 }, clip.duration - leftDuration),
   };
   return { ...timeline, clips: [...timeline.clips.filter((c) => c.id !== clipId), left, right] };
 }
@@ -221,6 +224,7 @@ export function trimClip(
     };
   }
 
+  trimmed.audio = clampAudio(trimmed.audio, trimmed.duration);
   const clips = timeline.clips.map((c) => (c.id === clipId ? trimmed : c));
   if (!track.isMain) return { ...timeline, clips };
   const next = { ...timeline, clips };
@@ -242,13 +246,17 @@ export function updateTrack(
   return { ...timeline, tracks: timeline.tracks.map((t) => (t.id === trackId ? { ...t, ...patch } : t)) };
 }
 
-export interface ClipVisualPatch {
+export interface ClipPropsPatch {
   transform?: Partial<Transform>;
   crop?: Partial<Crop>;
+  audio?: Partial<ClipAudio>;
 }
 
-/** Change a clip's on-canvas transform and/or crop. Opacity is kept within 0..1 and scale above 1%. */
-export function updateClipVisual(timeline: Timeline, clipId: string, patch: ClipVisualPatch): Timeline {
+/**
+ * Change a clip's transform, crop and/or audio settings. Values are clamped:
+ * opacity 0..1, scale above 1%, crop leaves part of the source, fades fit the clip.
+ */
+export function updateClipProps(timeline: Timeline, clipId: string, patch: ClipPropsPatch): Timeline {
   return {
     ...timeline,
     clips: timeline.clips.map((c) => {
@@ -256,7 +264,12 @@ export function updateClipVisual(timeline: Timeline, clipId: string, patch: Clip
       const transform = { ...c.transform, ...patch.transform };
       transform.opacity = Math.min(1, Math.max(0, transform.opacity));
       transform.scale = Math.max(0.01, transform.scale);
-      return { ...c, transform, crop: clampCrop({ ...c.crop, ...patch.crop }) };
+      return {
+        ...c,
+        transform,
+        crop: clampCrop({ ...c.crop, ...patch.crop }),
+        audio: clampAudio({ ...c.audio, ...patch.audio }, c.duration),
+      };
     }),
   };
 }
@@ -271,4 +284,27 @@ export function updateClipText(timeline: Timeline, clipId: string, patch: Partia
     ...timeline,
     clips: timeline.clips.map((c) => (c.id === clipId && c.text ? { ...c, text: { ...c.text, ...patch } } : c)),
   };
+}
+
+/**
+ * Move a video clip's sound onto its own clip on `audioTrack` (added to the
+ * timeline), lined up with the video, which then plays silently.
+ */
+export function detachAudio(timeline: Timeline, clipId: string, newId: string, audioTrack: Track): Timeline {
+  const clip = timeline.clips.find((c) => c.id === clipId);
+  if (!clip || clip.text || clip.audioDetached || clip.audioOnly) return timeline;
+  const audioClip: Clip = {
+    ...clip,
+    id: newId,
+    trackId: audioTrack.id,
+    transform: DEFAULT_TRANSFORM,
+    crop: NO_CROP,
+    audioOnly: true,
+  };
+  const withTrack = addTrack(timeline, audioTrack);
+  const marked = {
+    ...withTrack,
+    clips: withTrack.clips.map((c) => (c.id === clipId ? { ...c, audioDetached: true } : c)),
+  };
+  return insertClip(marked, audioClip, clip.start);
 }
