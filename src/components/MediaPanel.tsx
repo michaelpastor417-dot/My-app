@@ -6,12 +6,13 @@ import type { MediaAsset, MediaKind } from '../types';
 import { BASE_TEXT } from '../engine/text';
 import { STICKERS, TEXT_PRESETS } from '../timeline/textPresets';
 import { EffectsLibrary, FiltersLibrary, TransitionsLibrary } from './LookLibraries';
+import { AiTools } from './AiTools';
 
 export const ASSET_DRAG_TYPE = 'application/x-clipforge-asset';
 /** Drag payload for text presets and stickers: JSON of the `addText` source. */
 export const TEXT_DRAG_TYPE = 'application/x-clipforge-text';
 
-const TABS = ['Media', 'Audio', 'Text', 'Stickers', 'Effects', 'Transitions', 'Filters'] as const;
+const TABS = ['Media', 'Audio', 'Text', 'Stickers', 'Effects', 'Transitions', 'Filters', 'AI'] as const;
 type Tab = (typeof TABS)[number];
 
 export function MediaPanel() {
@@ -37,6 +38,7 @@ export function MediaPanel() {
       {tab === 'Effects' && <EffectsLibrary />}
       {tab === 'Transitions' && <TransitionsLibrary />}
       {tab === 'Filters' && <FiltersLibrary />}
+      {tab === 'AI' && <AiTools />}
     </aside>
   );
 }

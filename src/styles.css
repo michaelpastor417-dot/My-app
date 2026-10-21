@@ -1401,3 +1401,57 @@ select {
   justify-content: center;
   gap: 8px;
 }
+
+/* ---------- AI tools ---------- */
+.ai-tools {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.ai-tools .library-hint {
+  margin: 0;
+}
+.ai-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.ai-card h4 {
+  margin: 0;
+  font-size: 13px;
+}
+.ai-card .section-note {
+  margin: -4px 0 0;
+}
+.ai-target {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ai-target strong {
+  color: var(--text);
+}
+.ai-card .segmented button small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.ai-card .slider-field {
+  grid-template-columns: 70px minmax(0, 1fr) 48px;
+}
+.ai-progress {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ai-message {
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent);
+}
+.ai-message.error {
+  color: #ff7b7b;
+}

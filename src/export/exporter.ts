@@ -16,6 +16,7 @@ import { clipsAt, timelineDuration } from '../timeline/model';
 import { mediaTimeAt } from '../timeline/animation';
 import { Compositor, type MediaEl } from '../engine/Compositor';
 import { decodeAudio } from '../utils/media';
+import { ensureSegmenter } from '../ai/segmenter';
 import { audibleClips, mixAudio } from './audioMix';
 import { type QualityLevel, frameCount } from './settings';
 
@@ -111,6 +112,12 @@ export async function exportVideo(
   const audioCodec = withAudio
     ? await getFirstEncodableAudioCodec([...AUDIO_CODECS], { numberOfChannels: 2, sampleRate: SAMPLE_RATE, quality })
     : null;
+
+  if (timeline.clips.some((c) => c.removeBackground)) {
+    await ensureSegmenter().catch(() => {
+      throw new Error("Background removal couldn't start, so the export was stopped.");
+    });
+  }
 
   // Media elements of our own, so export seeking never disturbs the preview.
   const elements = new Map<string, MediaEl>();

@@ -279,4 +279,54 @@ describe('editor store', () => {
     s().applyEffect('glitch');
     expect(s().timeline.clips[0].effect).toBeUndefined();
   });
+
+  it('removes silences from a clip and reports what was cut', () => {
+    // 4s of video at 100 peaks/s: speech 0-1s, silence 1-3s, speech 3-4s
+    const peaks = [...Array(100).fill(0.8), ...Array(200).fill(0.001), ...Array(100).fill(0.8)];
+    useEditor.setState({ assets: [{ ...video, peaks }, photo] });
+    s().addToTimeline('v');
+    s().addToTimeline('p');
+    const result = s().removeSilences(s().timeline.clips[0].id);
+    expect(result).toEqual({ pauses: 1, seconds: expect.closeTo(1.76, 2) });
+    expect(mainStarts().map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)])).toEqual([[0, 1.12], [1.12, 1.12], [2.24, 3]]);
+    s().undo();
+    expect(mainStarts()).toEqual([[0, 4], [4, 3]]);
+  });
+
+  it('explains why silences cannot be removed', () => {
+    s().addToTimeline('p');
+    expect(s().removeSilences(s().timeline.clips[0].id)).toEqual({ error: 'Pick a video or audio clip.' });
+    useEditor.setState({ assets: [video, photo] }); // no waveform yet
+    s().addToTimeline('v');
+    const v = s().timeline.clips.find((c) => c.assetId === 'v')!;
+    expect(s().removeSilences(v.id)).toEqual({ error: 'Still analysing the sound. Try again in a moment.' });
+  });
+
+  it('adds captions as subtitle clips on their own text track, in one undo step', () => {
+    s().addToTimeline('v');
+    const id = s().timeline.clips[0].id;
+    const added = s().addCaptions(id, [
+      { text: 'Hello everyone', start: 0.5, end: 1.5 },
+      { text: 'welcome back', start: 2, end: 3 },
+    ]);
+    expect(added).toBe(2);
+    const captions = s().timeline.clips.filter((c) => c.text);
+    expect(captions.map((c) => [c.text!.content, c.start, c.duration])).toEqual([
+      ['Hello everyone', 0.5, 1],
+      ['welcome back', 2, 1],
+    ]);
+    expect(new Set(captions.map((c) => c.trackId)).size).toBe(1);
+    expect(captions[0].transform.y).toBe(0.38); // subtitle position
+    s().undo();
+    expect(s().timeline.clips.filter((c) => c.text)).toHaveLength(0);
+  });
+
+  it('toggles background removal', () => {
+    s().addToTimeline('v');
+    const id = s().timeline.clips[0].id;
+    s().setRemoveBackground(id, true);
+    expect(s().timeline.clips[0].removeBackground).toBe(true);
+    s().setRemoveBackground(id, false);
+    expect(s().timeline.clips[0].removeBackground).toBeUndefined();
+  });
 });

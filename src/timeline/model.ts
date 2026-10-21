@@ -420,3 +420,53 @@ export function setTransition(timeline: Timeline, clipId: string, transition: Cl
   const next = mapClip(timeline, clipId, (c) => ({ ...c, transition: transition ?? undefined }));
   return replaceTrackClips(next, track.id, packClips(clipsOnTrack(next, track.id)));
 }
+
+/**
+ * Replace a clip with pieces covering only the given source ranges (e.g. the
+ * parts with speech). Pieces keep every setting; the fade in stays on the
+ * first piece, the fade out and transition on the last. The main track closes
+ * the gaps; on other tracks the pieces sit back to back from the clip's start.
+ * `newIds` supplies ids for the pieces after the first (which keeps the clip's id).
+ */
+export function keepSourceRanges(
+  timeline: Timeline,
+  clipId: string,
+  ranges: [number, number][],
+  newIds: () => string,
+): Timeline {
+  const clip = timeline.clips.find((c) => c.id === clipId);
+  const track = clip && getTrack(timeline, clip.trackId);
+  if (!clip || !track || ranges.length === 0) return timeline;
+  const spanEnd = clip.inPoint + clip.duration * clip.speed;
+  const inside = ranges
+    .map(([a, b]): [number, number] => [Math.max(a, clip.inPoint), Math.min(b, spanEnd)])
+    .filter(([a, b]) => (b - a) / clip.speed >= MIN_CLIP_DURATION);
+  // A reversed clip plays its source backwards, so its pieces run from the latest range down.
+  if (clip.reversed) inside.reverse();
+  if (inside.length === 0) return timeline;
+
+  let cursor = clip.start;
+  const pieces = inside.map(([a, b], i): Clip => {
+    const duration = (b - a) / clip.speed;
+    const first = i === 0;
+    const last = i === inside.length - 1;
+    const piece: Clip = {
+      ...clip,
+      id: first ? clip.id : newIds(),
+      start: cursor,
+      inPoint: a,
+      duration,
+      transition: last ? clip.transition : undefined,
+      audio: clampAudio({ ...clip.audio, fadeIn: first ? clip.audio.fadeIn : 0, fadeOut: last ? clip.audio.fadeOut : 0 }, duration),
+    };
+    cursor += duration;
+    return piece;
+  });
+
+  const others = timeline.clips.filter((c) => c.id !== clipId);
+  const next = { ...timeline, clips: [...others, ...pieces] };
+  if (!track.isMain) return next;
+  // Keep the main track's order: the pieces take the original clip's place.
+  const ordered = clipsOnTrack(timeline, track.id).flatMap((c) => (c.id === clipId ? pieces : [c]));
+  return replaceTrackClips(next, track.id, packClips(ordered));
+}

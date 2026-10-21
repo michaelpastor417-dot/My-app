@@ -18,6 +18,8 @@ import { STICKER_TEXT, TEXT_PRESETS } from '../timeline/textPresets';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import { DEFAULT_AUDIO } from '../engine/audio';
 import { toggleKeyframe } from '../timeline/animation';
+import { DEFAULT_SILENCE, type SilenceOptions, speechRanges } from '../ai/silence';
+import { type SpeechChunk, captionLines, placeCaptions } from '../ai/captions';
 import {
   DEFAULT_IMAGE_DURATION,
   addTrack,
@@ -27,6 +29,7 @@ import {
   detachAudio,
   duplicateClip,
   insertFreezeFrame,
+  keepSourceRanges,
   mapClip,
   setClipSpeed,
   setReversed,
@@ -73,7 +76,7 @@ export interface OpenedProject {
   assets: MediaAsset[];
 }
 
-interface EditorState {
+export interface EditorState {
   assets: MediaAsset[];
   timeline: Timeline;
   currentTime: number;
@@ -144,6 +147,11 @@ interface EditorState {
   /** Library click: apply to the selected cut, else the main-track cut nearest the playhead. */
   applyTransition: (type: TransitionType) => void;
   selectTransition: (clipId: string | null) => void;
+  /** Cut out the clip's pauses. Reports what was removed, or why nothing could be. */
+  removeSilences: (clipId: string, options?: SilenceOptions) => SilenceResult;
+  setRemoveBackground: (clipId: string, on: boolean) => void;
+  /** Add recognised speech (timed in the clip's source) as subtitle clips on a new text track. Returns how many. */
+  addCaptions: (clipId: string, chunks: SpeechChunk[]) => number;
 
   /** Begin a live edit (e.g. a trim drag); updates (e.g. `trimGesture`) undo as one step. */
   beginGesture: () => void;
@@ -186,6 +194,8 @@ export function lookTargetOf(
   if (selected && visualMedia(selected)) return selected;
   return clipsAt(timeline, currentTime).find((c) => c.trackId === 'main' && visualMedia(c));
 }
+
+export type SilenceResult = { pauses: number; seconds: number } | { error: string };
 
 export function isClipLocked(timeline: Timeline, clip: Clip): boolean {
   return !!getTrack(timeline, clip.trackId)?.locked;
@@ -466,6 +476,61 @@ export const useEditor = create<EditorState>((set, get) => {
       const duration = chosen.transition?.duration ?? DEFAULT_TRANSITION_DURATION;
       get().setTransition(chosen.id, { type, duration });
       set({ selectedTransitionId: chosen.id, selectedClipId: null });
+    },
+
+    removeSilences: (clipId, options = DEFAULT_SILENCE) => {
+      const { timeline } = get();
+      const clip = timeline.clips.find((c) => c.id === clipId);
+      const asset = clip && assetFor(clip);
+      if (!clip || !asset || clip.text || asset.kind === 'image' || clip.freezeAt !== undefined) {
+        return { error: 'Pick a video or audio clip.' };
+      }
+      if (isClipLocked(timeline, clip)) return { error: "This clip's track is locked." };
+      if (clip.audioDetached) return { error: 'This clip\'s sound was detached. Use the audio clip instead.' };
+      if (!asset.peaks) return { error: 'Still analysing the sound. Try again in a moment.' };
+      if (asset.peaks.length === 0) return { error: 'This clip has no sound.' };
+      const from = clip.inPoint;
+      const to = clip.inPoint + clip.duration * clip.speed;
+      const keep = speechRanges(asset.peaks, from, to, options);
+      const kept = keep.reduce((n, [a, b]) => n + (b - a), 0);
+      const removed = (to - from - kept) / clip.speed;
+      if (keep.length === 0) return { error: 'The whole clip is silent at this sensitivity.' };
+      if (removed < 0.05) return { pauses: 0, seconds: 0 };
+      commit(keepSourceRanges(timeline, clipId, keep, uid));
+      // Pauses removed = gaps between kept ranges plus any trimmed from the ends.
+      const pauses = keep.length - 1 + (keep[0][0] > from ? 1 : 0) + (keep[keep.length - 1][1] < to ? 1 : 0);
+      return { pauses, seconds: removed };
+    },
+
+    setRemoveBackground: (clipId, on) =>
+      editClip(clipId, (t) => mapClip(t, clipId, (c) => ({ ...c, removeBackground: on || undefined }))),
+
+    addCaptions: (clipId, chunks) => {
+      const { timeline } = get();
+      const clip = timeline.clips.find((c) => c.id === clipId);
+      if (!clip) return 0;
+      const placed = placeCaptions(clip, captionLines(chunks));
+      if (placed.length === 0) return 0;
+      const track = newTrack('text');
+      const subtitle = TEXT_PRESETS.find((p) => p.id === 'subtitle')!;
+      let next = addTrack(timeline, track);
+      for (const line of placed) {
+        const caption: Clip = {
+          id: uid(),
+          trackId: track.id,
+          start: line.start,
+          inPoint: 0,
+          speed: 1,
+          duration: line.end - line.start,
+          text: { ...BASE_TEXT, ...subtitle.text, content: line.text },
+          transform: { ...DEFAULT_TRANSFORM, ...subtitle.transform },
+          crop: NO_CROP,
+          audio: DEFAULT_AUDIO,
+        };
+        next = insertClip(next, caption, line.start);
+      }
+      commit(next);
+      return placed.length;
     },
 
     freezeFrame: () => {

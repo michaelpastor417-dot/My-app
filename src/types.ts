@@ -189,6 +189,8 @@ export interface Clip {
    * `duration` seconds earlier so the two overlap while the transition plays.
    */
   transition?: { type: TransitionType; duration: number };
+  /** Cut out the person and drop the background (on-device segmentation). */
+  removeBackground?: boolean;
   /** A video clip whose sound was moved to its own audio clip; it plays silently. */
   audioDetached?: boolean;
   /** An audio clip that plays the sound of a video asset (made by detaching audio). */

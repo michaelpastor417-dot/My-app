@@ -4,6 +4,7 @@ import { transformAt } from '../timeline/animation';
 import { resolveLook } from '../timeline/look';
 import { type ActiveTransition, TRANSITION_CODES, transitionAt } from '../timeline/transitions';
 import { getGpu } from './gpu';
+import { BackgroundRemover } from '../ai/segmenter';
 import { animateText, layoutText, measureWithCanvas, paintText, revealLines } from './text';
 
 /** Longest side, in pixels, that a clip is colour-graded at on the GPU. */
@@ -23,6 +24,7 @@ export class Compositor {
   private ctx: CanvasRenderingContext2D;
   /** Offscreen layers the two clips of a transition are painted onto before blending. */
   private layers: CanvasRenderingContext2D[] = [];
+  private backgroundRemover = new BackgroundRemover();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -115,7 +117,19 @@ export class Compositor {
     const rect = clipRect(asset, transform, clip.crop, canvas.width, canvas.height);
     const sourceW = asset.width ?? canvas.width;
     const sourceH = asset.height ?? canvas.height;
-    const src = cropRect(sourceW, sourceH, clip.crop);
+    // With background removal the person cut-out (possibly downscaled by `k`) stands in for the frame.
+    let source: CanvasImageSource = el;
+    let k = 1;
+    if (clip.removeBackground && (el instanceof HTMLVideoElement || el instanceof HTMLImageElement)) {
+      const frameKey = el instanceof HTMLVideoElement ? el.currentTime.toFixed(4) : 'still';
+      const cut = this.backgroundRemover.cutout(clip.id, el, sourceW, sourceH, frameKey);
+      if (cut) {
+        source = cut.canvas;
+        k = cut.scale;
+      }
+    }
+    const crop = cropRect(sourceW, sourceH, clip.crop);
+    const src = { sx: crop.sx * k, sy: crop.sy * k, sw: crop.sw * k, sh: crop.sh * k };
     const look = resolveLook(clip);
     const gpu = look && getGpu();
     ctx.save();
@@ -127,10 +141,10 @@ export class Compositor {
       const cap = Math.min(1, MAX_GPU_SIZE / Math.max(src.sw, src.sh));
       const outW = Math.max(1, Math.round(src.sw * cap));
       const outH = Math.max(1, Math.round(src.sh * cap));
-      const graded = gpu.processClip(el as TexImageSource, sourceW, sourceH, src, look, t, outW, outH);
+      const graded = gpu.processClip(source as TexImageSource, sourceW * k, sourceH * k, src, look, t, outW, outH);
       ctx.drawImage(graded, 0, 0, outW, outH, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
     } else {
-      ctx.drawImage(el, src.sx, src.sy, src.sw, src.sh, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
+      ctx.drawImage(source, src.sx, src.sy, src.sw, src.sh, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
     }
     ctx.restore();
   }

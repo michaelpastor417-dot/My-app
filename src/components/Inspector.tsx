@@ -16,6 +16,7 @@ import {
   volumeAt,
 } from '../timeline/animation';
 import { TEXT_INPUT_ID } from './TransformOverlay';
+import { BackgroundToggle } from './AiTools';
 
 type TextProps = { clip: Clip; text: TextData };
 
@@ -279,6 +280,9 @@ function MediaClipTabs({ clip, asset, locked }: { clip: Clip; asset: MediaAsset;
         {(tab === 'Video' || tab === 'Audio') && <KeyframeBar clip={clip} />}
         {tab === 'Video' && (
           <>
+            <section className="inspector-section">
+              <BackgroundToggle clip={clip} />
+            </section>
             <TransformSection clip={clip} />
             <CropSection clip={clip} />
           </>
