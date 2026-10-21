@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_ZOOM, MIN_ZOOM, isClipLocked, useEditor } from '../store/editorStore';
 import { clipEnd, timelineDuration } from '../timeline/model';
 import { formatTime } from '../utils/time';
+import { trackDrag } from '../utils/drag';
 import { ASSET_DRAG_TYPE } from './MediaPanel';
 import type { Clip, MediaAsset, Track } from '../types';
 
@@ -165,8 +166,8 @@ export function Timeline() {
   }
 
   // ---- Trimming ----
-  // Tracked with window listeners rather than pointer capture: a trim re-lays
-  // out the track, and the browser drops capture if React moves the element.
+  // Tracked with window listeners: a trim re-lays out the track, and the
+  // browser drops pointer capture if React moves the element.
   function onTrimPointerDown(e: React.PointerEvent, clip: Clip, edge: 'start' | 'end') {
     if (e.button !== 0) return;
     e.stopPropagation();
@@ -177,19 +178,13 @@ export function Timeline() {
     const edgeTime = edge === 'start' ? clip.start : clipEnd(clip);
     const edges = snapEdges(clip.id);
 
-    const onMove = (ev: PointerEvent) => {
-      const raw = edgeTime + (ev.clientX - pointerStartX) / zoom;
-      useEditor.getState().trimGesture(clip.id, edge, snap(raw, edges));
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      useEditor.getState().endGesture();
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    trackDrag(
+      (ev) => {
+        const raw = edgeTime + (ev.clientX - pointerStartX) / zoom;
+        useEditor.getState().trimGesture(clip.id, edge, snap(raw, edges));
+      },
+      () => useEditor.getState().endGesture(),
+    );
   }
 
   // ---- Dropping media from the library ----

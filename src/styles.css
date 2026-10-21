@@ -89,7 +89,7 @@ select {
 /* ---------- Workspace ---------- */
 .workspace {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 260px;
+  grid-template-columns: 320px minmax(0, 1fr) 280px;
   gap: 1px;
   background: var(--border);
   min-height: 0;
@@ -243,19 +243,113 @@ select {
   font-weight: 600;
 }
 .preview-stage {
-  position: relative;
   flex: 1;
   min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
   background: #0b0b0d;
+  container-type: size;
+  overflow: hidden;
 }
-/* The canvas renders at full export resolution; object-fit scales it to the stage. */
-.preview-stage canvas {
+/* Largest box with the canvas's aspect ratio that fits the stage. */
+.preview-frame {
+  position: relative;
+  width: min(100cqw, 100cqh * var(--frame-ratio));
+}
+.preview-frame canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.transform-overlay {
   position: absolute;
-  inset: 12px;
-  width: calc(100% - 24px);
-  height: calc(100% - 24px);
-  object-fit: contain;
-  cursor: pointer;
+  inset: 0;
+  cursor: default;
+}
+.selection-box {
+  position: absolute;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  cursor: move;
+}
+.selection-box.locked {
+  border-style: dashed;
+  border-color: var(--muted);
+  cursor: not-allowed;
+}
+.scale-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+.scale-handle.nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.scale-handle.ne {
+  right: 0;
+  top: 0;
+  cursor: nesw-resize;
+}
+.scale-handle.se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+.scale-handle.sw {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+.rotate-handle {
+  position: absolute;
+  left: 50%;
+  top: -34px;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50%;
+  background: #fff;
+  color: #222;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+}
+.rotation-badge {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  font-size: 12px;
+  pointer-events: none;
+}
+.snap-guide {
+  position: absolute;
+  background: var(--accent);
+  pointer-events: none;
+}
+.snap-guide.vertical {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.snap-guide.horizontal {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
 }
 .preview-controls {
   display: grid;
@@ -285,6 +379,19 @@ select {
 }
 
 /* ---------- Inspector ---------- */
+.inspector-body {
+  flex: 1;
+  overflow-y: auto;
+}
+.inspector fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.inspector fieldset:disabled {
+  opacity: 0.45;
+}
 .empty-hint {
   color: var(--muted);
   padding: 12px;
@@ -305,7 +412,94 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-transform: none;
+}
+.inspector-section {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 10px;
+}
+.inspector-section header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.inspector-section h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+.field {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.slider-field {
+  grid-template-columns: 52px minmax(0, 1fr) 64px;
+}
+.slider-field input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.field-value {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.field input[type='number'] {
+  width: 100%;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 4px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.number-field {
+  grid-template-columns: 14px minmax(0, 1fr);
+}
+.field input[type='color'] {
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+}
+.segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 2px;
+}
+.segmented button {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 4px;
+  color: var(--muted);
+}
+.segmented button.active {
+  background: var(--border);
+  color: var(--text);
 }
 
 /* ---------- Timeline ---------- */

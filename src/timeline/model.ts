@@ -1,4 +1,5 @@
-import type { Clip, Timeline, Track } from '../types';
+import type { CanvasBackground, Clip, Crop, Timeline, Track, Transform } from '../types';
+import { clampCrop } from '../engine/geometry';
 
 /**
  * Pure timeline operations. Every function returns a new Timeline and never
@@ -11,6 +12,7 @@ export function createTimeline(): Timeline {
   return {
     tracks: [{ id: 'main', kind: 'video', isMain: true, muted: false, hidden: false, locked: false }],
     clips: [],
+    background: { type: 'color', color: '#000000' },
   };
 }
 
@@ -232,4 +234,27 @@ export function updateTrack(
   patch: Partial<Pick<Track, 'muted' | 'hidden' | 'locked'>>,
 ): Timeline {
   return { ...timeline, tracks: timeline.tracks.map((t) => (t.id === trackId ? { ...t, ...patch } : t)) };
+}
+
+export interface ClipVisualPatch {
+  transform?: Partial<Transform>;
+  crop?: Partial<Crop>;
+}
+
+/** Change a clip's on-canvas transform and/or crop. Opacity is kept within 0..1 and scale above 1%. */
+export function updateClipVisual(timeline: Timeline, clipId: string, patch: ClipVisualPatch): Timeline {
+  return {
+    ...timeline,
+    clips: timeline.clips.map((c) => {
+      if (c.id !== clipId) return c;
+      const transform = { ...c.transform, ...patch.transform };
+      transform.opacity = Math.min(1, Math.max(0, transform.opacity));
+      transform.scale = Math.max(0.01, transform.scale);
+      return { ...c, transform, crop: clampCrop({ ...c.crop, ...patch.crop }) };
+    }),
+  };
+}
+
+export function setBackground(timeline: Timeline, background: CanvasBackground): Timeline {
+  return { ...timeline, background };
 }

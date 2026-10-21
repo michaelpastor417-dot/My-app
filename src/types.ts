@@ -32,6 +32,33 @@ export interface Track {
   locked: boolean;
 }
 
+/**
+ * Where a visual clip sits on the canvas.
+ * Position is the offset of the clip's centre from the canvas centre, as a
+ * fraction of canvas width/height, so it survives aspect-ratio changes.
+ * Scale 1 means "fit inside the canvas", like CapCut's default.
+ */
+export interface Transform {
+  x: number;
+  y: number;
+  scale: number;
+  /** Degrees, clockwise. */
+  rotation: number;
+  /** 0 (invisible) to 1 (opaque). */
+  opacity: number;
+}
+
+/** Fraction (0 to 1) of the source trimmed away from each side. */
+export interface Crop {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** What fills the canvas where the main-track media doesn't cover it. */
+export type CanvasBackground = { type: 'color'; color: string } | { type: 'blur'; amount: number };
+
 /** A placed piece of media on the timeline. All times are in seconds. */
 export interface Clip {
   id: string;
@@ -43,10 +70,15 @@ export interface Clip {
   inPoint: number;
   /** Length of the clip on the timeline. */
   duration: number;
+  /** Ignored for audio clips. */
+  transform: Transform;
+  /** Ignored for audio clips. */
+  crop: Crop;
 }
 
 export interface Timeline {
   /** Ordered top to bottom as drawn; visual stacking is the reverse (top track renders on top). */
   tracks: Track[];
   clips: Clip[];
+  background: CanvasBackground;
 }

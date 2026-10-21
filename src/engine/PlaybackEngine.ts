@@ -1,5 +1,6 @@
 import type { Clip, MediaAsset, Timeline } from '../types';
 import { clipsAt, timelineDuration } from '../timeline/model';
+import { clipRect, cropRect } from './geometry';
 import { useEditor } from '../store/editorStore';
 
 /** Max drift (seconds) between a playing media element and the master clock before we re-seek it. */
@@ -8,6 +9,8 @@ const PLAYING_DRIFT_TOLERANCE = 0.15;
 const PAUSED_DRIFT_TOLERANCE = 1 / 60;
 /** How far ahead (seconds) to start seeking an upcoming clip's media to its in point. */
 const PRE_ROLL = 1;
+/** Blur radius at background blur amount 1, as a fraction of the canvas's longer side. */
+const BLUR_RADIUS_FRACTION = 0.06;
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement | HTMLImageElement;
 
@@ -136,6 +139,7 @@ export class PlaybackEngine {
     const { ctx, canvas } = this;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.drawBackground(timeline, assets, active);
 
     // Tracks are listed top to bottom; paint bottom-up so upper tracks cover lower ones.
     for (let i = timeline.tracks.length - 1; i >= 0; i--) {
@@ -143,22 +147,55 @@ export class PlaybackEngine {
       if (track.kind !== 'video' || track.hidden) continue;
       for (const clip of active) {
         if (clip.trackId !== track.id) continue;
-        const el = this.elements.get(clip.id);
-        const asset = assets.find((a) => a.id === clip.assetId);
-        if (!el || !asset || el instanceof HTMLAudioElement) continue;
-        if (el instanceof HTMLVideoElement && el.readyState < 2) continue;
-        if (el instanceof HTMLImageElement && !el.complete) continue;
-        this.drawContained(el, asset.width ?? canvas.width, asset.height ?? canvas.height);
+        const frame = this.drawable(clip, assets);
+        if (frame) this.drawClip(clip, frame.el, frame.asset);
       }
     }
   }
 
-  /** Draw a source scaled to fit inside the canvas, centered (letterboxed). */
-  private drawContained(source: CanvasImageSource, sw: number, sh: number) {
-    const { width: cw, height: ch } = this.canvas;
-    const scale = Math.min(cw / sw, ch / sh);
-    const w = sw * scale;
-    const h = sh * scale;
-    this.ctx.drawImage(source, (cw - w) / 2, (ch - h) / 2, w, h);
+  /** The element and asset to paint for a clip, or null if it has nothing ready to show. */
+  private drawable(clip: Clip, assets: MediaAsset[]) {
+    const el = this.elements.get(clip.id);
+    const asset = assets.find((a) => a.id === clip.assetId);
+    if (!el || !asset || el instanceof HTMLAudioElement) return null;
+    if (el instanceof HTMLVideoElement && el.readyState < 2) return null;
+    if (el instanceof HTMLImageElement && !el.complete) return null;
+    return { el, asset };
+  }
+
+  private drawClip(clip: Clip, el: CanvasImageSource, asset: MediaAsset) {
+    const { ctx, canvas } = this;
+    const rect = clipRect(asset, clip.transform, clip.crop, canvas.width, canvas.height);
+    const src = cropRect(asset.width ?? canvas.width, asset.height ?? canvas.height, clip.crop);
+    ctx.save();
+    ctx.globalAlpha = clip.transform.opacity;
+    ctx.translate(rect.cx, rect.cy);
+    ctx.rotate((rect.rotation * Math.PI) / 180);
+    ctx.drawImage(el, src.sx, src.sy, src.sw, src.sh, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
+    ctx.restore();
+  }
+
+  /** Fill the canvas with a solid colour, or a blurred, canvas-filling copy of the main-track frame. */
+  private drawBackground(timeline: Timeline, assets: MediaAsset[], active: Clip[]) {
+    const { ctx, canvas } = this;
+    const bg = timeline.background;
+    if (bg.type === 'color') {
+      ctx.fillStyle = bg.color;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    const main = timeline.tracks.find((t) => t.isMain);
+    const clip = main && !main.hidden && active.find((c) => c.trackId === main.id);
+    const frame = clip && this.drawable(clip, assets);
+    if (!clip || !frame) return;
+    const src = cropRect(frame.asset.width ?? canvas.width, frame.asset.height ?? canvas.height, clip.crop);
+    // Cover the canvas, overscanned slightly so the blur doesn't fade in at the edges.
+    const scale = Math.max(canvas.width / src.sw, canvas.height / src.sh) * 1.1;
+    const w = src.sw * scale;
+    const h = src.sh * scale;
+    ctx.save();
+    ctx.filter = `blur(${Math.round(bg.amount * Math.max(canvas.width, canvas.height) * BLUR_RADIUS_FRACTION)}px)`;
+    ctx.drawImage(frame.el, src.sx, src.sy, src.sw, src.sh, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    ctx.restore();
   }
 }

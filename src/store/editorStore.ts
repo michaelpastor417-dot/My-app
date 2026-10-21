@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { Clip, MediaAsset, Timeline, Track, TrackKind } from '../types';
+import type { CanvasBackground, Clip, MediaAsset, Timeline, Track, TrackKind } from '../types';
+import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import {
   DEFAULT_IMAGE_DURATION,
   addTrack,
@@ -10,10 +11,13 @@ import {
   insertClip,
   moveClip,
   pruneEmptyTracks,
+  type ClipVisualPatch,
   removeClip,
+  setBackground,
   splitClip,
   timelineDuration,
   trimClip,
+  updateClipVisual,
   updateTrack,
 } from '../timeline/model';
 import { uid } from '../utils/id';
@@ -21,6 +25,8 @@ import { uid } from '../utils/id';
 export const MIN_ZOOM = 10; // px per second
 export const MAX_ZOOM = 400;
 const HISTORY_LIMIT = 100;
+/** Repeated edits of the same property within this window (e.g. a slider drag) undo as one step. */
+const COALESCE_MS = 1000;
 
 export const ASPECT_RATIOS = {
   '16:9': [1920, 1080],
@@ -62,6 +68,14 @@ interface EditorState {
   copySelected: () => void;
   paste: () => void;
   toggleTrackFlag: (trackId: string, flag: 'muted' | 'hidden' | 'locked') => void;
+  /**
+   * Edit a clip's transform/crop as an undoable step. Consecutive edits with
+   * the same `coalesceKey` (e.g. one slider being dragged) merge into one step.
+   */
+  updateClip: (clipId: string, patch: ClipVisualPatch, coalesceKey?: string) => void;
+  /** Edit a clip's transform/crop during a gesture started with `beginGesture`. */
+  updateClipLive: (clipId: string, patch: ClipVisualPatch) => void;
+  setBackground: (background: CanvasBackground, coalesceKey?: string) => void;
 
   /** Begin a live edit (e.g. a trim drag); updates (e.g. `trimGesture`) undo as one step. */
   beginGesture: () => void;
@@ -101,13 +115,20 @@ function resolveTrack(timeline: Timeline, kind: TrackKind, requested?: string): 
 }
 
 export const useEditor = create<EditorState>((set, get) => {
+  let lastCoalesce: { key: string; at: number } | null = null;
+
   /** Replace the timeline as one undoable step, keeping selection and playhead valid. */
-  function commit(next: Timeline, extra: Partial<EditorState> = {}) {
+  function commit(next: Timeline, extra: Partial<EditorState> = {}, coalesceKey?: string) {
     const { timeline, past } = get();
     if (next === timeline) return;
+    const now = Date.now();
+    const merge =
+      coalesceKey !== undefined && lastCoalesce?.key === coalesceKey && now - lastCoalesce.at < COALESCE_MS;
+    lastCoalesce = coalesceKey === undefined ? null : { key: coalesceKey, at: now };
     set({
       timeline: next,
-      past: [...past, timeline].slice(-HISTORY_LIMIT),
+      // When merging, the history already holds the state from before this run of edits.
+      past: merge ? past : [...past, timeline].slice(-HISTORY_LIMIT),
       future: [],
       ...extra,
     });
@@ -154,7 +175,11 @@ export const useEditor = create<EditorState>((set, get) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset) return;
       const duration = asset.kind === 'image' ? DEFAULT_IMAGE_DURATION : asset.duration;
-      place({ id: uid(), assetId, inPoint: 0, duration }, asset.kind === 'audio' ? 'audio' : 'video', opts);
+      place(
+        { id: uid(), assetId, inPoint: 0, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP },
+        asset.kind === 'audio' ? 'audio' : 'video',
+        opts,
+      );
     },
 
     moveClip: (clipId, start, trackId) => {
@@ -214,6 +239,23 @@ export const useEditor = create<EditorState>((set, get) => {
       const selected = get().timeline.clips.find((c) => c.id === get().selectedClipId);
       commit(next, deselect && selected?.trackId === trackId ? { selectedClipId: null } : {});
     },
+
+    updateClip: (clipId, patch, coalesceKey) => {
+      const { timeline } = get();
+      const clip = timeline.clips.find((c) => c.id === clipId);
+      if (!clip || isClipLocked(timeline, clip)) return;
+      commit(updateClipVisual(timeline, clipId, patch), {}, coalesceKey && `${clipId}:${coalesceKey}`);
+    },
+
+    updateClipLive: (clipId, patch) => {
+      const { timeline, gestureBase } = get();
+      const clip = timeline.clips.find((c) => c.id === clipId);
+      if (!gestureBase || !clip || isClipLocked(timeline, clip)) return;
+      set({ timeline: updateClipVisual(timeline, clipId, patch) });
+    },
+
+    setBackground: (background, coalesceKey) =>
+      commit(setBackground(get().timeline, background), {}, coalesceKey && `bg:${coalesceKey}`),
 
     beginGesture: () => set({ gestureBase: get().timeline }),
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip, Track } from '../types';
+import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import {
   MIN_CLIP_DURATION,
   addTrack,
@@ -25,6 +26,8 @@ const clip = (id: string, duration: number, trackId = 'main', start = 0): Clip =
   start,
   inPoint: 0,
   duration,
+  transform: DEFAULT_TRANSFORM,
+  crop: NO_CROP,
 });
 
 const overlay: Track = { id: 'ov', kind: 'video', isMain: false, muted: false, hidden: false, locked: false };

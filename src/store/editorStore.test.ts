@@ -88,4 +88,45 @@ describe('editor store', () => {
     expect(mainStarts()).toEqual([]);
     expect(s().timeline.tracks).toHaveLength(2);
   });
+
+  it('slider-style edits of one property undo as a single step', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().updateClip(id, { transform: { scale: 0.9 } }, 'scale');
+    s().updateClip(id, { transform: { scale: 0.8 } }, 'scale');
+    s().updateClip(id, { transform: { scale: 0.7 } }, 'scale');
+    s().updateClip(id, { transform: { opacity: 0.5 } }, 'opacity');
+    s().undo();
+    expect(s().timeline.clips[0].transform).toMatchObject({ scale: 0.7, opacity: 1 });
+    s().undo();
+    expect(s().timeline.clips[0].transform.scale).toBe(1);
+  });
+
+  it('clamps opacity and crop', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().updateClip(id, { transform: { opacity: 3 }, crop: { left: 0.6, right: 0.6 } });
+    const c = s().timeline.clips[0];
+    expect(c.transform.opacity).toBe(1);
+    expect(c.crop.left + c.crop.right).toBeCloseTo(0.95);
+  });
+
+  it('a preview drag (live updates) undoes as one step', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().beginGesture();
+    s().updateClipLive(id, { transform: { x: 0.1 } });
+    s().updateClipLive(id, { transform: { x: 0.2 } });
+    s().endGesture();
+    expect(s().timeline.clips[0].transform.x).toBe(0.2);
+    s().undo();
+    expect(s().timeline.clips[0].transform.x).toBe(0);
+  });
+
+  it('background changes are undoable', () => {
+    s().setBackground({ type: 'blur', amount: 0.5 });
+    expect(s().timeline.background.type).toBe('blur');
+    s().undo();
+    expect(s().timeline.background.type).toBe('color');
+  });
 });
