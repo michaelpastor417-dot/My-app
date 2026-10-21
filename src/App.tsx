@@ -14,6 +14,21 @@ function useKeyboardShortcuts() {
       const target = e.target as HTMLElement;
       if (target.closest('input, textarea, select, [contenteditable]')) return;
       const s = useEditor.getState();
+      if (e.ctrlKey || e.metaKey) {
+        const handled = {
+          z: () => (e.shiftKey ? s.redo() : s.undo()),
+          y: s.redo,
+          b: s.splitAtPlayhead,
+          d: s.duplicateSelected,
+          c: s.copySelected,
+          v: s.paste,
+        }[e.key.toLowerCase()];
+        if (handled) {
+          e.preventDefault();
+          handled();
+        }
+        return;
+      }
       switch (e.key) {
         case ' ':
           e.preventDefault();

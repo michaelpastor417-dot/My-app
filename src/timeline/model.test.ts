@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { Clip, Track } from '../types';
 import {
+  MIN_CLIP_DURATION,
   addTrack,
   clipsAt,
   clipsOnTrack,
   createTimeline,
+  duplicateClip,
   findFreeStart,
   insertClip,
   moveClip,
   pruneEmptyTracks,
   removeClip,
+  splitClip,
   timelineDuration,
+  trimClip,
+  updateTrack,
 } from './model';
 
 const clip = (id: string, duration: number, trackId = 'main', start = 0): Clip => ({
@@ -22,8 +27,8 @@ const clip = (id: string, duration: number, trackId = 'main', start = 0): Clip =
   duration,
 });
 
-const overlay: Track = { id: 'ov', kind: 'video', isMain: false, muted: false, hidden: false };
-const audio: Track = { id: 'au', kind: 'audio', isMain: false, muted: false, hidden: false };
+const overlay: Track = { id: 'ov', kind: 'video', isMain: false, muted: false, hidden: false, locked: false };
+const audio: Track = { id: 'au', kind: 'audio', isMain: false, muted: false, hidden: false, locked: false };
 
 const starts = (clips: Clip[]) => clips.map((c) => [c.id, c.start]);
 
@@ -116,5 +121,97 @@ describe('queries', () => {
   it('pruneEmptyTracks keeps the main track', () => {
     const t = pruneEmptyTracks(addTrack(createTimeline(), overlay));
     expect(t.tracks.map((tr) => tr.id)).toEqual(['main']);
+  });
+});
+
+describe('splitClip', () => {
+  it('cuts a clip into two halves with matching source offsets', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), inPoint: 1 });
+    t = splitClip(t, 'a', 1.5, 'b');
+    const [a, b] = clipsOnTrack(t, 'main');
+    expect(a).toMatchObject({ id: 'a', start: 0, inPoint: 1, duration: 1.5 });
+    expect(b).toMatchObject({ id: 'b', start: 1.5, inPoint: 2.5, duration: 2.5 });
+  });
+
+  it('ignores a split at the very edge of a clip', () => {
+    const t = insertClip(createTimeline(), clip('a', 4));
+    expect(splitClip(t, 'a', 0, 'b')).toBe(t);
+    expect(splitClip(t, 'a', 4, 'b')).toBe(t);
+  });
+});
+
+describe('trimClip', () => {
+  it('trims the end of a main clip and ripples later clips', () => {
+    let t = insertClip(createTimeline(), clip('a', 4));
+    t = insertClip(t, clip('b', 2));
+    t = trimClip(t, 'a', 'end', 3, 10);
+    expect(starts(clipsOnTrack(t, 'main'))).toEqual([['a', 0], ['b', 3]]);
+  });
+
+  it('cannot extend past the end of the source media', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), inPoint: 1 });
+    t = trimClip(t, 'a', 'end', 10, 6);
+    expect(clipsOnTrack(t, 'main')[0].duration).toBe(5);
+  });
+
+  it('trimming the start of a main clip keeps it packed and advances the in point', () => {
+    let t = insertClip(createTimeline(), clip('a', 2));
+    t = insertClip(t, clip('b', 4));
+    t = trimClip(t, 'b', 'start', 3, 10); // drag b's left edge 1s right
+    const b = clipsOnTrack(t, 'main')[1];
+    expect(b).toMatchObject({ start: 2, inPoint: 1, duration: 3 });
+  });
+
+  it('cannot extend the start before the beginning of the source', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 2), inPoint: 0.5 });
+    t = trimClip(t, 'a', 'start', -5, 10);
+    expect(clipsOnTrack(t, 'main')[0]).toMatchObject({ inPoint: 0, duration: 2.5 });
+  });
+
+  it('stops overlay trims at neighbouring clips', () => {
+    let t = addTrack(createTimeline(), overlay);
+    t = insertClip(t, clip('a', 1, 'ov'), 0);
+    t = insertClip(t, { ...clip('b', 1, 'ov'), inPoint: 5 }, 3);
+    t = insertClip(t, clip('c', 1, 'ov'), 6);
+    t = trimClip(t, 'b', 'start', 0, 10);
+    t = trimClip(t, 'b', 'end', 99, 10);
+    expect(clipsOnTrack(t, 'ov')[1]).toMatchObject({ start: 1, inPoint: 3, duration: 5 });
+  });
+
+  it('never makes a clip shorter than one frame', () => {
+    let t = insertClip(createTimeline(), clip('a', 2));
+    t = trimClip(t, 'a', 'end', -1, 10);
+    expect(clipsOnTrack(t, 'main')[0].duration).toBeCloseTo(MIN_CLIP_DURATION);
+  });
+
+  it('lets images stretch freely', () => {
+    let t = insertClip(createTimeline(), clip('img', 3));
+    t = trimClip(t, 'img', 'end', 20, Infinity);
+    t = trimClip(t, 'img', 'start', -4, Infinity);
+    expect(clipsOnTrack(t, 'main')[0]).toMatchObject({ start: 0, inPoint: 0, duration: 24 });
+  });
+});
+
+describe('duplicateClip', () => {
+  it('inserts the copy right after the original on the main track', () => {
+    let t = insertClip(createTimeline(), clip('a', 2));
+    t = insertClip(t, clip('b', 2));
+    t = duplicateClip(t, 'a', 'a2');
+    expect(starts(clipsOnTrack(t, 'main'))).toEqual([['a', 0], ['a2', 2], ['b', 4]]);
+  });
+
+  it('places an overlay copy in the next free spot', () => {
+    let t = addTrack(createTimeline(), overlay);
+    t = insertClip(t, clip('a', 2, 'ov'), 1);
+    t = insertClip(t, clip('b', 1, 'ov'), 3.5);
+    t = duplicateClip(t, 'a', 'a2');
+    expect(starts(clipsOnTrack(t, 'ov'))).toEqual([['a', 1], ['b', 3.5], ['a2', 4.5]]);
+  });
+});
+
+describe('updateTrack', () => {
+  it('toggles track flags', () => {
+    const t = updateTrack(createTimeline(), 'main', { locked: true, muted: true });
+    expect(t.tracks[0]).toMatchObject({ locked: true, muted: true, hidden: false });
   });
 });

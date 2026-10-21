@@ -6,6 +6,8 @@ import { useEditor } from '../store/editorStore';
 const PLAYING_DRIFT_TOLERANCE = 0.15;
 /** Paused frames must be exact-ish so scrubbing shows the right frame. */
 const PAUSED_DRIFT_TOLERANCE = 1 / 60;
+/** How far ahead (seconds) to start seeking an upcoming clip's media to its in point. */
+const PRE_ROLL = 1;
 
 type MediaEl = HTMLVideoElement | HTMLAudioElement | HTMLImageElement;
 
@@ -107,6 +109,11 @@ export class PlaybackEngine {
 
       if (!activeIds.has(clip.id)) {
         if (!el.paused) el.pause();
+        // Pre-seek clips that are about to start so cuts don't flash black while they seek.
+        const lead = clip.start - t;
+        if (lead > 0 && lead < PRE_ROLL && !el.seeking && Math.abs(el.currentTime - clip.inPoint) > PAUSED_DRIFT_TOLERANCE) {
+          el.currentTime = clip.inPoint;
+        }
         continue;
       }
 

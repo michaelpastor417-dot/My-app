@@ -20,15 +20,19 @@ npm run build      # typecheck + production build
 | Playback engine | `src/engine/PlaybackEngine.ts` | Master clock plus one media element per clip, kept in sync with the clock; composites visible clips onto the preview canvas every frame. |
 | UI | `src/components/*` | Media panel, player, properties panel, timeline. |
 
+Keyboard shortcuts: Space play/pause · Ctrl+B split · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo/redo · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · Del delete · ←/→ step a frame (Shift: 1s).
+
 Timeline rules (matching CapCut):
 - **Main track is magnetic:** clips sit back to back with no gaps. Dropping between clips inserts, and deleting closes the gap.
 - **Overlay and audio tracks are free:** clips go anywhere but never overlap on the same track.
 - Upper tracks render on top of lower ones.
+- Clips can't be trimmed past the ends of their source media; images stretch freely.
+- Locked tracks can't be edited; hidden tracks don't render; muted tracks are silent.
 
 ## Roadmap
 
 - [x] **Step 1: Foundation.** Import video/image/audio, media library, main + overlay + audio tracks, drag & drop, clip move/reorder with snapping, ruler scrubbing, synced preview playback, canvas ratios, zoom, keyboard shortcuts (Space, Del, ←/→).
-- [ ] **Step 2: Core editing.** Split at playhead, trim handles, undo/redo, copy/paste/duplicate, track mute/hide/lock.
+- [x] **Step 2: Core editing.** Split at playhead, trim handles (with snapping and ripple on the main track), undo/redo, copy/paste/duplicate, track mute/hide/lock.
 - [ ] **Step 3: Transform & canvas.** Position/scale/rotate/opacity on the preview with handles, background (blur/color), crop.
 - [ ] **Step 4: Text & stickers.** Text clips with fonts, styles, animations; stickers.
 - [ ] **Step 5: Audio.** Waveforms, volume, fade in/out, extract audio, voiceover recording.

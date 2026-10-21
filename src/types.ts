@@ -28,6 +28,8 @@ export interface Track {
   isMain: boolean;
   muted: boolean;
   hidden: boolean;
+  /** Locked tracks can't be edited: no selecting, moving, trimming, splitting or dropping. */
+  locked: boolean;
 }
 
 /** A placed piece of media on the timeline. All times are in seconds. */

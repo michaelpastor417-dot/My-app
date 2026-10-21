@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MAX_ZOOM, MIN_ZOOM, useEditor } from '../store/editorStore';
+import { MAX_ZOOM, MIN_ZOOM, isClipLocked, useEditor } from '../store/editorStore';
 import { clipEnd, timelineDuration } from '../timeline/model';
 import { formatTime } from '../utils/time';
 import { ASSET_DRAG_TYPE } from './MediaPanel';
 import type { Clip, MediaAsset, Track } from '../types';
 
-const HEADER_WIDTH = 120;
+const HEADER_WIDTH = 150;
 /** Extra empty timeline shown past the last clip so there's room to drop. */
 const TAIL_SECONDS = 30;
 const SNAP_PX = 8;
@@ -46,7 +46,14 @@ export function Timeline() {
   const currentTime = useEditor((s) => s.currentTime);
   const isPlaying = useEditor((s) => s.isPlaying);
   const selectedClipId = useEditor((s) => s.selectedClipId);
-  const { seek, select, deleteSelected, addToTimeline, moveClip } = useEditor.getState();
+  const canUndo = useEditor((s) => s.past.length > 0);
+  const canRedo = useEditor((s) => s.future.length > 0);
+  const selectedLocked = useEditor((s) => {
+    const clip = s.timeline.clips.find((c) => c.id === s.selectedClipId);
+    return !clip || isClipLocked(s.timeline, clip);
+  });
+  const { seek, select, deleteSelected, addToTimeline, moveClip, undo, redo, splitAtPlayhead, duplicateSelected } =
+    useEditor.getState();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -84,28 +91,43 @@ export function Timeline() {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) seek(timeFromClientX(e.clientX));
   }
 
-  // ---- Clip dragging ----
-  function snapStart(clip: Clip, rawStart: number): number {
+  // ---- Snapping ----
+  /** Edges a dragged clip or trim handle can snap to: zero, the playhead and every other clip's ends. */
+  function snapEdges(excludeId: string): number[] {
     const edges = [0, currentTime];
-    for (const c of timeline.clips) if (c.id !== clip.id) edges.push(c.start, clipEnd(c));
-    const threshold = SNAP_PX / zoom;
-    let best = rawStart;
-    let bestDist = threshold;
-    for (const edge of edges) {
-      for (const candidate of [edge, edge - clip.duration]) {
-        const d = Math.abs(candidate - rawStart);
-        if (d < bestDist) {
-          bestDist = d;
-          best = candidate;
-        }
+    for (const c of timeline.clips) if (c.id !== excludeId) edges.push(c.start, clipEnd(c));
+    return edges;
+  }
+
+  /** Snap `raw` to the nearest candidate within SNAP_PX, or return it unchanged. */
+  function snap(raw: number, candidates: number[]): number {
+    let best = raw;
+    let bestDist = SNAP_PX / zoom;
+    for (const candidate of candidates) {
+      const d = Math.abs(candidate - raw);
+      if (d < bestDist) {
+        bestDist = d;
+        best = candidate;
       }
     }
-    return Math.max(0, best);
+    return best;
+  }
+
+  // ---- Clip dragging ----
+  function snapStart(clip: Clip, rawStart: number): number {
+    // Snap either the clip's start or its end to an edge.
+    const edges = snapEdges(clip.id);
+    const candidates = [...edges, ...edges.map((e) => e - clip.duration)];
+    return Math.max(0, snap(rawStart, candidates));
   }
 
   function onClipPointerDown(e: React.PointerEvent, clip: Clip) {
     if (e.button !== 0) return;
     e.stopPropagation();
+    if (isClipLocked(timeline, clip)) {
+      select(null);
+      return;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     select(clip.id);
     setDrag({
@@ -142,6 +164,34 @@ export function Timeline() {
     setDrag(null);
   }
 
+  // ---- Trimming ----
+  // Tracked with window listeners rather than pointer capture: a trim re-lays
+  // out the track, and the browser drops capture if React moves the element.
+  function onTrimPointerDown(e: React.PointerEvent, clip: Clip, edge: 'start' | 'end') {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const store = useEditor.getState();
+    store.setPlaying(false);
+    store.beginGesture();
+    const pointerStartX = e.clientX;
+    const edgeTime = edge === 'start' ? clip.start : clipEnd(clip);
+    const edges = snapEdges(clip.id);
+
+    const onMove = (ev: PointerEvent) => {
+      const raw = edgeTime + (ev.clientX - pointerStartX) / zoom;
+      useEditor.getState().trimGesture(clip.id, edge, snap(raw, edges));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      useEditor.getState().endGesture();
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
   // ---- Dropping media from the library ----
   function acceptsAsset(e: React.DragEvent) {
     if (!e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) return false;
@@ -160,11 +210,21 @@ export function Timeline() {
   return (
     <section className="timeline">
       <div className="timeline-toolbar">
-        <button className="tool-btn" onClick={deleteSelected} disabled={!selectedClipId} title="Delete (Del)">
+        <button className="tool-btn" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+          ↶
+        </button>
+        <button className="tool-btn" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
+          ↷
+        </button>
+        <div className="toolbar-divider" />
+        <button className="tool-btn" onClick={splitAtPlayhead} disabled={!hasClips} title="Split at playhead (Ctrl+B)">
+          ✂ Split
+        </button>
+        <button className="tool-btn" onClick={deleteSelected} disabled={selectedLocked} title="Delete (Del)">
           🗑 Delete
         </button>
-        <button className="tool-btn" disabled title="Split arrives in the next step">
-          ✂ Split
+        <button className="tool-btn" onClick={duplicateSelected} disabled={selectedLocked} title="Duplicate (Ctrl+D)">
+          ⧉ Duplicate
         </button>
         <div className="toolbar-spacer" />
         <label className="zoom-control" title="Zoom (Ctrl + scroll)">
@@ -216,7 +276,8 @@ export function Timeline() {
             <TrackRow
               key={track.id}
               track={track}
-              clips={timeline.clips.filter((c) => c.trackId === track.id)}
+              // Stable DOM order (by id) so edits never move a clip element mid-drag.
+              clips={timeline.clips.filter((c) => c.trackId === track.id).sort((a, b) => (a.id < b.id ? -1 : 1))}
               assets={assets}
               zoom={zoom}
               selectedClipId={selectedClipId}
@@ -225,7 +286,8 @@ export function Timeline() {
               onClipPointerDown={onClipPointerDown}
               onClipPointerMove={onClipPointerMove}
               onClipPointerUp={onClipPointerUp}
-              onDragOver={acceptsAsset}
+              onTrimPointerDown={onTrimPointerDown}
+              onDragOver={(e) => !track.locked && acceptsAsset(e)}
               onDrop={(e) => onDropAsset(e, track.id)}
               emptyHint={track.isMain && !hasClips}
             />
@@ -276,16 +338,38 @@ function TrackRow(props: {
   onClipPointerDown: (e: React.PointerEvent, clip: Clip) => void;
   onClipPointerMove: (e: React.PointerEvent, clip: Clip) => void;
   onClipPointerUp: () => void;
+  onTrimPointerDown: (e: React.PointerEvent, clip: Clip, edge: 'start' | 'end') => void;
   onDragOver: (e: React.DragEvent) => boolean;
   onDrop: (e: React.DragEvent) => void;
 }) {
   const { track, zoom, drag } = props;
   const label = track.isMain ? 'Main' : track.kind === 'audio' ? 'Audio' : 'Overlay';
+  const toggle = useEditor((s) => s.toggleTrackFlag);
+  const trimHandle = (clip: Clip, edge: 'start' | 'end') => (
+    <div
+      className={`trim-handle ${edge}`}
+      onPointerDown={(e) => props.onTrimPointerDown(e, clip, edge)}
+    />
+  );
   return (
-    <div className={`track-row ${track.kind} ${track.isMain ? 'main' : ''}`}>
+    <div
+      className={`track-row ${track.kind} ${track.isMain ? 'main' : ''} ${track.locked ? 'locked' : ''} ${
+        track.hidden ? 'hidden' : ''
+      }`}
+    >
       <div className="track-header" style={{ width: HEADER_WIDTH }}>
-        <span className="track-icon">{track.kind === 'audio' ? '♪' : '▣'}</span>
-        {label}
+        <span className="track-name">{label}</span>
+        <TrackToggle on={track.locked} onClick={() => toggle(track.id, 'locked')} title={track.locked ? 'Unlock track' : 'Lock track'}>
+          {track.locked ? '🔒' : '🔓'}
+        </TrackToggle>
+        {track.kind === 'video' && (
+          <TrackToggle on={track.hidden} onClick={() => toggle(track.id, 'hidden')} title={track.hidden ? 'Show track' : 'Hide track'}>
+            {track.hidden ? '◌' : '◉'}
+          </TrackToggle>
+        )}
+        <TrackToggle on={track.muted} onClick={() => toggle(track.id, 'muted')} title={track.muted ? 'Unmute track' : 'Mute track'}>
+          {track.muted ? '🔇' : '🔊'}
+        </TrackToggle>
       </div>
       <div
         className={`track-lane ${props.isDropTarget ? 'drop-target' : ''}`}
@@ -297,10 +381,11 @@ function TrackRow(props: {
         {props.clips.map((clip) => {
           const asset = props.assets.find((a) => a.id === clip.assetId);
           const dragging = drag?.clipId === clip.id && drag.moved;
+          const selected = props.selectedClipId === clip.id;
           return (
             <div
               key={clip.id}
-              className={`clip ${asset?.kind ?? ''} ${props.selectedClipId === clip.id ? 'selected' : ''} ${
+              className={`clip ${asset?.kind ?? ''} ${selected ? 'selected' : ''} ${
                 dragging ? 'dragging' : ''
               }`}
               style={{
@@ -317,10 +402,29 @@ function TrackRow(props: {
               <span className="clip-label">
                 {asset?.name} · {formatTime(clip.duration)}
               </span>
+              {selected && !track.locked && !dragging && (
+                <>
+                  {trimHandle(clip, 'start')}
+                  {trimHandle(clip, 'end')}
+                </>
+              )}
             </div>
           );
         })}
       </div>
     </div>
+  );
+}
+
+function TrackToggle(props: { on: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+  return (
+    <button
+      className={`track-toggle ${props.on ? 'on' : ''}`}
+      title={props.title}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={props.onClick}
+    >
+      {props.children}
+    </button>
   );
 }
