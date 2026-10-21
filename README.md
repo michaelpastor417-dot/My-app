@@ -26,6 +26,7 @@ npm run build      # typecheck + production build
 | GPU | `src/engine/gpu.ts` | WebGL2 shaders: per-clip colour grading + effects, and transitions between two canvas-sized layers. The 2D compositor places the results. |
 | Looks & transitions | `src/timeline/look.ts`, `src/timeline/transitions.ts` | Filter presets, adjustments and effects resolved into shader inputs; transition overlap, timing and audio crossfade (pure, tested). |
 | Geometry | `src/engine/geometry.ts` | Where each clip lands on the canvas (transform + crop), hit testing and rotation maths, shared by the renderer and the player's handles. |
+| Projects | `src/projects/*` | IndexedDB storage of project documents and media files, autosave, open/close, import; versioned format with an upgrade hook (tested with fake-indexeddb). |
 | UI | `src/components/*` | Media panel, player, properties panel, timeline. |
 
 Keyboard shortcuts: Space play/pause · Ctrl+B split · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo/redo · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · Del delete · ←/→ step a frame (Shift: 1s).
@@ -47,6 +48,6 @@ Timeline rules (matching CapCut):
 - [x] **Step 6: Speed & keyframes.** Speed 0.1×–10× (presets or exact), reverse, freeze frame, keyframe animation of position/scale/rotation/opacity/volume with CapCut-style auto-keyframing, keyframe navigation and timeline diamonds. (Speed curves come later.)
 - [x] **Step 7: Effects, filters, transitions.** WebGL2 pipeline: 10 colour adjustments, 10 filters with strength (previews rendered by the real shader), 8 effects (blur, vignette, glitch, RGB split, pixelate, grain, mirror, shake), 9 transitions between main-track clips with overlap and audio crossfade; tabbed Properties panel.
 - [x] **Step 8: Export.** Frame-accurate MP4 export (480p–4K, 24–60 fps, three quality levels) through the same compositor as the preview; offline audio mix with keyframes, fades, crossfades, reversed audio and pitch-preserving speed changes; progress, cancel, in-dialog playback. H.264/AAC where the browser supports it, otherwise VP9/Opus.
-- [ ] **Step 9: Projects.** Save/load projects locally (IndexedDB), autosave, drafts list.
+- [x] **Step 9: Projects.** Home screen with project cards (thumbnail, length, last edited), new / open / rename / duplicate / delete, autosave (with a save indicator) into the browser's IndexedDB, imported media and voiceovers stored once and shared between copies, unused files cleaned up on delete, versioned project format.
 - [ ] **Step 10: AI features.** Auto captions, background removal, smart cut.
 - [ ] **Step 11: Platforms.** Desktop (Tauri/Electron) and mobile (Capacitor) packaging, touch UI.

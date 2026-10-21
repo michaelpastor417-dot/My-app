@@ -63,6 +63,16 @@ export const ASPECT_RATIOS = {
 } as const;
 export type AspectRatio = keyof typeof ASPECT_RATIOS;
 
+/** Everything needed to show a project in the editor. */
+export interface OpenedProject {
+  projectId: string;
+  projectName: string;
+  projectCreatedAt: number;
+  aspectRatio: AspectRatio;
+  timeline: Timeline;
+  assets: MediaAsset[];
+}
+
 interface EditorState {
   assets: MediaAsset[];
   timeline: Timeline;
@@ -74,6 +84,11 @@ interface EditorState {
   /** Timeline zoom in pixels per second. */
   zoom: number;
   aspectRatio: AspectRatio;
+  /** The open project, or null on the home screen. */
+  projectId: string | null;
+  projectName: string;
+  projectCreatedAt: number;
+  saveStatus: 'saved' | 'saving' | 'unsaved' | 'error';
   clipboard: Clip | null;
 
   /** Undo stack: earlier timelines, most recent last. */
@@ -143,6 +158,11 @@ interface EditorState {
   togglePlay: () => void;
   setZoom: (zoom: number) => void;
   setAspectRatio: (ratio: AspectRatio) => void;
+  setProjectName: (name: string) => void;
+  /** Replace everything with a project's contents (fresh history, playhead at 0). */
+  openProject: (project: OpenedProject) => void;
+  /** Back to the home screen. */
+  closeProject: () => void;
 }
 
 function newTrack(kind: TrackKind): Track {
@@ -280,6 +300,10 @@ export const useEditor = create<EditorState>((set, get) => {
     selectedTransitionId: null,
     zoom: 60,
     aspectRatio: '16:9',
+    projectId: null,
+    projectName: '',
+    projectCreatedAt: 0,
+    saveStatus: 'saved',
     clipboard: null,
     past: [],
     future: [],
@@ -513,5 +537,33 @@ export const useEditor = create<EditorState>((set, get) => {
     setZoom: (zoom) => set({ zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom)) }),
 
     setAspectRatio: (aspectRatio) => set({ aspectRatio }),
+
+    setProjectName: (projectName) => set({ projectName }),
+
+    openProject: (project) =>
+      set({
+        ...project,
+        currentTime: 0,
+        isPlaying: false,
+        selectedClipId: null,
+        selectedTransitionId: null,
+        clipboard: null,
+        past: [],
+        future: [],
+        gestureBase: null,
+        saveStatus: 'saved',
+      }),
+
+    closeProject: () =>
+      set({
+        projectId: null,
+        isPlaying: false,
+        assets: [],
+        timeline: createTimeline(),
+        selectedClipId: null,
+        selectedTransitionId: null,
+        past: [],
+        future: [],
+      }),
   };
 });

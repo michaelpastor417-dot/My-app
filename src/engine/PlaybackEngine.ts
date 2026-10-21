@@ -87,7 +87,7 @@ export class PlaybackEngine {
     for (const clip of timeline.clips) {
       if (!clip.assetId || this.elements.has(clip.id)) continue;
       const asset = assets.find((a) => a.id === clip.assetId);
-      if (asset) this.elements.set(clip.id, this.createElement(clip, asset));
+      if (asset && !asset.missing) this.elements.set(clip.id, this.createElement(clip, asset));
     }
   }
 

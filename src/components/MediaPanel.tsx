@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useEditor } from '../store/editorStore';
-import { importFile, loadPeaks } from '../utils/media';
+import { importMedia } from '../projects/session';
 import { formatTime } from '../utils/time';
 import type { MediaAsset, MediaKind } from '../types';
 import { BASE_TEXT } from '../engine/text';
@@ -106,8 +106,6 @@ function StickerLibrary() {
 function MediaLibrary({ kinds, hint }: { kinds: MediaKind[]; hint?: string }) {
   const allAssets = useEditor((s) => s.assets);
   const assets = allAssets.filter((a) => kinds.includes(a.kind));
-  const addAssets = useEditor((s) => s.addAssets);
-  const updateAsset = useEditor((s) => s.updateAsset);
   const inputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -118,16 +116,13 @@ function MediaLibrary({ kinds, hint }: { kinds: MediaKind[]; hint?: string }) {
     if (list.length === 0) return;
     setError(null);
     setImporting((n) => n + list.length);
-    const results = await Promise.all(list.map(importFile));
+    const { unsupported, noSpace } = await importMedia(list);
     setImporting((n) => n - list.length);
-    const ok = results.filter((a): a is MediaAsset => a !== null);
-    addAssets(ok);
-    // Waveforms decode in the background; clips show them once ready.
-    for (const asset of ok) {
-      if (asset.kind !== 'image') loadPeaks(asset.url).then((peaks) => updateAsset(asset.id, { peaks }));
-    }
-    const failed = list.length - ok.length;
-    if (failed > 0) setError(`${failed} file${failed > 1 ? 's' : ''} couldn't be imported (unsupported format).`);
+    const problems = [
+      unsupported > 0 && `${unsupported} file${unsupported > 1 ? 's' : ''} couldn't be imported (unsupported format).`,
+      noSpace > 0 && `${noSpace} file${noSpace > 1 ? 's' : ''} couldn't be saved: the browser's storage is full.`,
+    ].filter(Boolean);
+    if (problems.length) setError(problems.join(' '));
   }
 
   return (
@@ -180,16 +175,17 @@ function AssetTile({ asset }: { asset: MediaAsset }) {
   const addToTimeline = useEditor((s) => s.addToTimeline);
   return (
     <div
-      className="asset"
+      className={`asset ${asset.missing ? 'missing' : ''}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(ASSET_DRAG_TYPE, asset.id);
         e.dataTransfer.effectAllowed = 'copy';
       }}
       onDoubleClick={() => addToTimeline(asset.id)}
-      title={asset.name}
+      title={asset.missing ? `${asset.name}: the file is no longer in this browser's storage` : asset.name}
     >
       <div className="asset-thumb">
+        {asset.missing && <span className="asset-missing">Missing</span>}
         {asset.thumbnail ? (
           <img src={asset.thumbnail} alt="" draggable={false} />
         ) : (

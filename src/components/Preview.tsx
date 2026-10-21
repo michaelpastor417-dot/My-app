@@ -4,6 +4,7 @@ import { PlaybackEngine } from '../engine/PlaybackEngine';
 import { timelineDuration } from '../timeline/model';
 import { formatTime } from '../utils/time';
 import { TransformOverlay } from './TransformOverlay';
+import { setThumbnailSource } from '../projects/session';
 
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -20,9 +21,13 @@ export function Preview() {
 
   useEffect(() => {
     const engine = new PlaybackEngine(canvasRef.current!);
+    setThumbnailSource(canvasRef.current);
     // Exposed in development so browser tests can inspect playback state.
     if (import.meta.env.DEV) Object.assign(window, { __engine: engine, __editor: useEditor });
-    return () => engine.destroy();
+    return () => {
+      engine.destroy();
+      setThumbnailSource(null);
+    };
   }, []);
 
   // Track the on-screen size of the canvas so the overlay can map screen pixels to canvas pixels.

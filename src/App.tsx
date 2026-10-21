@@ -5,6 +5,8 @@ import { Preview } from './components/Preview';
 import { Inspector } from './components/Inspector';
 import { Timeline } from './components/Timeline';
 import { useEditor } from './store/editorStore';
+import { Home } from './components/Home';
+import { startAutosave } from './projects/session';
 
 const FRAME = 1 / 30;
 
@@ -14,6 +16,7 @@ function useKeyboardShortcuts() {
       const target = e.target as HTMLElement;
       if (target.closest('input, textarea, select, [contenteditable]')) return;
       const s = useEditor.getState();
+      if (!s.projectId) return; // no editing shortcuts on the home screen
       if (e.ctrlKey || e.metaKey) {
         const handled = {
           z: () => (e.shiftKey ? s.redo() : s.undo()),
@@ -58,6 +61,9 @@ function useKeyboardShortcuts() {
 
 export function App() {
   useKeyboardShortcuts();
+  useEffect(() => startAutosave(), []);
+  const inProject = useEditor((s) => s.projectId !== null);
+  if (!inProject) return <Home />;
   return (
     <div className="app">
       <TopBar />

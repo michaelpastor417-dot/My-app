@@ -19,6 +19,8 @@ export interface MediaAsset {
    * file has no sound.
    */
   peaks?: number[];
+  /** The file couldn't be found in storage when the project was opened. */
+  missing?: boolean;
 }
 
 /** Text tracks hold text and sticker clips and always draw above video tracks. */

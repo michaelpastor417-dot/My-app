@@ -116,7 +116,7 @@ export async function exportVideo(
   const elements = new Map<string, MediaEl>();
   for (const clip of timeline.clips) {
     const asset = assets.find((a) => a.id === clip.assetId);
-    const el = asset && (await loadElement(clip, asset));
+    const el = asset && !asset.missing && (await loadElement(clip, asset));
     if (el) elements.set(clip.id, el);
   }
   const canvas = document.createElement('canvas');

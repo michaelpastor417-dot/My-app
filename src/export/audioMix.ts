@@ -14,6 +14,7 @@ export function audibleClips(timeline: Timeline, assets: MediaAsset[]): Clip[] {
     const track = timeline.tracks.find((t) => t.id === c.trackId);
     return (
       asset &&
+      !asset.missing &&
       asset.kind !== 'image' &&
       asset.peaks?.length !== 0 && // known to be silent
       !c.text &&

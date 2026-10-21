@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../store/editorStore';
-import { importFile, loadPeaks } from '../utils/media';
+import { importMedia } from '../projects/session';
 import { formatTime } from '../utils/time';
 
 interface Recording {
@@ -60,15 +60,12 @@ export function VoiceoverButton() {
     takeCount.current += 1;
     const extension = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'm4a' : 'webm';
     const file = new File([blob], `Voiceover ${takeCount.current}.${extension}`, { type: blob.type || 'audio/webm' });
-    const asset = await importFile(file);
-    if (!asset) {
-      setError("The recording couldn't be read.");
+    const { imported, noSpace } = await importMedia([file]);
+    if (!imported.length) {
+      setError(noSpace ? "The recording couldn't be saved: storage is full." : "The recording couldn't be read.");
       return;
     }
-    const store = useEditor.getState();
-    store.addAssets([asset]);
-    store.addToTimeline(asset.id, { trackId: 'new', at });
-    store.updateAsset(asset.id, { peaks: await loadPeaks(asset.url) });
+    useEditor.getState().addToTimeline(imported[0].id, { trackId: 'new', at });
   }
 
   return (
