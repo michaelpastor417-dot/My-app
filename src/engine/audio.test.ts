@@ -9,6 +9,7 @@ const clip = (audio = DEFAULT_AUDIO, extra: Partial<Clip> = {}): Clip => ({
   trackId: 't',
   start: 10,
   inPoint: 0,
+  speed: 1,
   duration: 4,
   transform: DEFAULT_TRANSFORM,
   crop: NO_CROP,

@@ -1,6 +1,7 @@
 import type { CanvasBackground, Clip, ClipAudio, Crop, TextData, Timeline, Track, Transform } from '../types';
 import { DEFAULT_TRANSFORM, NO_CROP, clampCrop } from '../engine/geometry';
 import { clampAudio } from '../engine/audio';
+import { MAX_SPEED, MIN_SPEED, mediaTimeAt, setValuesAt, transformAt } from './animation';
 
 /**
  * Pure timeline operations. Every function returns a new Timeline and never
@@ -162,15 +163,24 @@ export function splitClip(timeline: Timeline, clipId: string, t: number, newId: 
     return timeline;
   }
   const leftDuration = t - clip.start;
+  const rightDuration = clip.duration - leftDuration;
+  // A reversed clip shows the end of its source span first, so its left half covers the later source.
+  const leftIn = clip.reversed ? clip.inPoint + rightDuration * clip.speed : clip.inPoint;
+  const rightIn = clip.reversed ? clip.inPoint : clip.inPoint + leftDuration * clip.speed;
   // Fades belong to the clip's outer edges: the left half keeps the fade in, the right the fade out.
-  const left: Clip = { ...clip, duration: leftDuration, audio: clampAudio({ ...clip.audio, fadeOut: 0 }, leftDuration) };
+  const left: Clip = {
+    ...clip,
+    inPoint: leftIn,
+    duration: leftDuration,
+    audio: clampAudio({ ...clip.audio, fadeOut: 0 }, leftDuration),
+  };
   const right: Clip = {
     ...clip,
     id: newId,
     start: t,
-    inPoint: clip.inPoint + leftDuration,
-    duration: clip.duration - leftDuration,
-    audio: clampAudio({ ...clip.audio, fadeIn: 0 }, clip.duration - leftDuration),
+    inPoint: rightIn,
+    duration: rightDuration,
+    audio: clampAudio({ ...clip.audio, fadeIn: 0 }, rightDuration),
   };
   return { ...timeline, clips: [...timeline.clips.filter((c) => c.id !== clipId), left, right] };
 }
@@ -179,7 +189,8 @@ export function splitClip(timeline: Timeline, clipId: string, t: number, newId: 
  * Drag one edge of a clip to timeline time `t`.
  *
  * `sourceDuration` is the length of the clip's media; pass Infinity for
- * images, which can be stretched freely. A clip can't be trimmed past its
+ * images, text and freeze frames, which can be stretched freely. Speed and
+ * reversal are respected: on a reversed clip the left edge is the end of the source. A clip can't be trimmed past its
  * source media, shorter than one frame, or (on overlay tracks) into a
  * neighbouring clip. On the main track the clip stays packed: trimming its
  * start shortens it from the left and everything after it ripples.
@@ -194,24 +205,32 @@ export function trimClip(
   const clip = timeline.clips.find((c) => c.id === clipId);
   const track = clip && getTrack(timeline, clip.trackId);
   if (!clip || !track) return timeline;
-  const bounded = Number.isFinite(sourceDuration);
   const siblings = clipsOnTrack(timeline, track.id).filter((c) => c.id !== clipId);
   const end = clipEnd(clip);
+  // Timeline seconds of unused source before and after the covered span.
+  const spanEnd = clip.inPoint + clip.duration * clip.speed;
+  const roomBefore = Number.isFinite(sourceDuration) ? clip.inPoint / clip.speed : Infinity;
+  const roomAfter = Number.isFinite(sourceDuration) ? (sourceDuration - spanEnd) / clip.speed : Infinity;
   let trimmed: Clip;
 
   if (edge === 'end') {
-    let maxEnd = bounded ? clip.start + (sourceDuration - clip.inPoint) : Infinity;
+    let maxEnd = end + (clip.reversed ? roomBefore : roomAfter);
     if (!track.isMain) {
       const next = siblings.find((c) => c.start >= end);
       if (next) maxEnd = Math.min(maxEnd, next.start);
     }
     const newEnd = Math.min(Math.max(t, clip.start + MIN_CLIP_DURATION), maxEnd);
-    trimmed = { ...clip, duration: newEnd - clip.start };
+    const grow = newEnd - end;
+    trimmed = {
+      ...clip,
+      duration: newEnd - clip.start,
+      inPoint: clip.reversed ? clip.inPoint - grow * clip.speed : clip.inPoint,
+    };
   } else {
     // How far the left edge moves; positive shortens the clip.
     let delta = t - clip.start;
     delta = Math.min(delta, clip.duration - MIN_CLIP_DURATION);
-    if (bounded) delta = Math.max(delta, -clip.inPoint);
+    delta = Math.max(delta, -(clip.reversed ? roomAfter : roomBefore));
     if (!track.isMain) {
       const prev = [...siblings].reverse().find((c) => clipEnd(c) <= clip.start);
       delta = Math.max(delta, (prev ? clipEnd(prev) : 0) - clip.start);
@@ -219,7 +238,8 @@ export function trimClip(
     trimmed = {
       ...clip,
       start: track.isMain ? clip.start : clip.start + delta,
-      inPoint: bounded ? clip.inPoint + delta : clip.inPoint,
+      // Images and text have no real source, but their in point still moves so keyframes stay put.
+      inPoint: clip.reversed ? clip.inPoint : clip.inPoint + delta * clip.speed,
       duration: clip.duration - delta,
     };
   }
@@ -253,25 +273,24 @@ export interface ClipPropsPatch {
 }
 
 /**
- * Change a clip's transform, crop and/or audio settings. Values are clamped:
- * opacity 0..1, scale above 1%, crop leaves part of the source, fades fit the clip.
+ * Change a clip's transform, crop and/or audio settings. Transform and volume
+ * go through keyframes when the clip has any (edited or added at timeline time
+ * `t`). Values are clamped: opacity 0..1, scale above 1%, crop leaves part of
+ * the source, fades fit the clip.
  */
-export function updateClipProps(timeline: Timeline, clipId: string, patch: ClipPropsPatch): Timeline {
-  return {
-    ...timeline,
-    clips: timeline.clips.map((c) => {
-      if (c.id !== clipId) return c;
-      const transform = { ...c.transform, ...patch.transform };
-      transform.opacity = Math.min(1, Math.max(0, transform.opacity));
-      transform.scale = Math.max(0.01, transform.scale);
-      return {
-        ...c,
-        transform,
-        crop: clampCrop({ ...c.crop, ...patch.crop }),
-        audio: clampAudio({ ...c.audio, ...patch.audio }, c.duration),
-      };
-    }),
-  };
+export function updateClipProps(timeline: Timeline, clipId: string, patch: ClipPropsPatch, t?: number): Timeline {
+  return mapClip(timeline, clipId, (clip) => {
+    const { volume, ...audio } = patch.audio ?? {};
+    const animated =
+      patch.transform || volume !== undefined
+        ? setValuesAt(clip, t ?? clip.start, { transform: patch.transform, volume })
+        : clip;
+    return {
+      ...animated,
+      crop: clampCrop({ ...animated.crop, ...patch.crop }),
+      audio: clampAudio({ ...animated.audio, ...audio }, animated.duration),
+    };
+  });
 }
 
 export function setBackground(timeline: Timeline, background: CanvasBackground): Timeline {
@@ -307,4 +326,82 @@ export function detachAudio(timeline: Timeline, clipId: string, newId: string, a
     clips: withTrack.clips.map((c) => (c.id === clipId ? { ...c, audioDetached: true } : c)),
   };
   return insertClip(marked, audioClip, clip.start);
+}
+
+export const FREEZE_DURATION = 3;
+
+/**
+ * Change a clip's speed, keeping the same source span (so its timeline length
+ * changes). The main track ripples; on an overlay track, a clip that would now
+ * overlap its neighbour moves to `spareTrack`, which is added for it.
+ */
+export function setClipSpeed(timeline: Timeline, clipId: string, speed: number, spareTrack: Track): Timeline {
+  const clip = timeline.clips.find((c) => c.id === clipId);
+  const track = clip && getTrack(timeline, clip.trackId);
+  if (!clip || !track) return timeline;
+  const clamped = Math.min(MAX_SPEED, Math.max(MIN_SPEED, speed));
+  const duration = (clip.duration * clip.speed) / clamped;
+  const updated: Clip = { ...clip, speed: clamped, duration, audio: clampAudio(clip.audio, duration) };
+  const others = timeline.clips.filter((c) => c.id !== clipId);
+
+  if (track.isMain) {
+    const next = { ...timeline, clips: [...others, updated] };
+    return replaceTrackClips(next, track.id, packClips(clipsOnTrack(next, track.id)));
+  }
+  const overlaps = others.some((c) => c.trackId === track.id && c.start < clipEnd(updated) && clipEnd(c) > updated.start);
+  if (!overlaps) return { ...timeline, clips: [...others, updated] };
+  const withTrack = addTrack({ ...timeline, clips: others }, { ...spareTrack, kind: track.kind });
+  return { ...withTrack, clips: [...others, { ...updated, trackId: spareTrack.id }] };
+}
+
+export function setReversed(timeline: Timeline, clipId: string, reversed: boolean): Timeline {
+  return {
+    ...timeline,
+    clips: timeline.clips.map((c) => (c.id === clipId ? { ...c, reversed: reversed || undefined } : c)),
+  };
+}
+
+/**
+ * Insert a FREEZE_DURATION still of the frame showing at `t`, splitting the
+ * clip there; later clips on the track move right to make room.
+ */
+export function insertFreezeFrame(
+  timeline: Timeline,
+  clipId: string,
+  t: number,
+  ids: { right: string; freeze: string },
+): Timeline {
+  const clip = timeline.clips.find((c) => c.id === clipId);
+  const track = clip && getTrack(timeline, clip.trackId);
+  if (!clip || !track || clip.text || clip.freezeAt !== undefined || t < clip.start || t > clipEnd(clip)) {
+    return timeline;
+  }
+  const freeze: Clip = {
+    ...clip,
+    id: ids.freeze,
+    start: t,
+    inPoint: 0,
+    speed: 1,
+    duration: FREEZE_DURATION,
+    reversed: undefined,
+    keyframes: undefined,
+    freezeAt: mediaTimeAt(clip, Math.min(t, clipEnd(clip) - MIN_CLIP_DURATION)),
+    transform: transformAt(clip, t),
+    audio: { volume: 0, fadeIn: 0, fadeOut: 0 },
+  };
+  const split = splitClip(timeline, clipId, t, ids.right);
+  if (track.isMain) return insertClip(split, freeze, t);
+  // Overlay: ripple this track's later clips right, then drop the still into the gap.
+  const shifted = {
+    ...split,
+    clips: split.clips.map((c) =>
+      c.trackId === track.id && c.start >= t - 1e-9 ? { ...c, start: c.start + FREEZE_DURATION } : c,
+    ),
+  };
+  return { ...shifted, clips: [...shifted.clips, freeze] };
+}
+
+/** Apply a function to one clip. */
+export function mapClip(timeline: Timeline, clipId: string, fn: (clip: Clip) => Clip): Timeline {
+  return { ...timeline, clips: timeline.clips.map((c) => (c.id === clipId ? fn(c) : c)) };
 }

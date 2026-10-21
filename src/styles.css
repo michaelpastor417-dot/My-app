@@ -556,6 +556,41 @@ select {
   accent-color: var(--accent);
 }
 
+.keyframe-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.keyframe-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+}
+.kf-nav,
+.kf-toggle {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 28px;
+  height: 24px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.kf-toggle {
+  font-size: 14px;
+}
+.kf-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.speed-presets button {
+  font-size: 11px;
+  padding: 4px 0;
+}
+.speed-field {
+  grid-template-columns: 52px 80px;
+}
+
 /* ---------- Text & stickers library ---------- */
 .library-hint {
   margin: 0 0 10px;
@@ -845,6 +880,21 @@ select {
 .waveform {
   display: block;
   width: 100%;
+}
+.keyframe-diamond {
+  position: absolute;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  background: #fff;
+  border: 1px solid #333;
+  transform: rotate(45deg);
+  pointer-events: none;
+  z-index: 1;
+}
+.clip-badge {
+  font-weight: 700;
 }
 .clip-label {
   position: absolute;

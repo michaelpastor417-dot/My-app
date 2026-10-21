@@ -4,6 +4,7 @@ import { BASE_TEXT, DEFAULT_TEXT_DURATION } from '../engine/text';
 import { STICKER_TEXT, TEXT_PRESETS } from '../timeline/textPresets';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import { DEFAULT_AUDIO } from '../engine/audio';
+import { toggleKeyframe } from '../timeline/animation';
 import {
   DEFAULT_IMAGE_DURATION,
   addTrack,
@@ -12,6 +13,10 @@ import {
   createTimeline,
   detachAudio,
   duplicateClip,
+  insertFreezeFrame,
+  mapClip,
+  setClipSpeed,
+  setReversed,
   findFreeStart,
   getTrack,
   insertClip,
@@ -90,6 +95,12 @@ interface EditorState {
   /** Edit a clip's transform/crop during a gesture started with `beginGesture`. */
   updateClipLive: (clipId: string, patch: ClipPropsPatch) => void;
   setBackground: (background: CanvasBackground, coalesceKey?: string) => void;
+  setSpeed: (clipId: string, speed: number, coalesceKey?: string) => void;
+  toggleReverse: (clipId: string) => void;
+  /** Add a keyframe at the playhead capturing the clip's current values, or remove the one there. */
+  toggleKeyframe: (clipId: string) => void;
+  /** Insert a 3-second still of the frame at the playhead (selected clip, else the main-track clip). */
+  freezeFrame: () => void;
 
   /** Begin a live edit (e.g. a trim drag); updates (e.g. `trimGesture`) undo as one step. */
   beginGesture: () => void;
@@ -183,10 +194,22 @@ export const useEditor = create<EditorState>((set, get) => {
 
   /** How far a clip can be stretched: its media's length, or unbounded for images and text. */
   function sourceDurationOf(clip: Clip): number | null {
-    if (clip.text) return Infinity;
+    if (clip.text || clip.freezeAt !== undefined) return Infinity;
     const asset = assetFor(clip);
     if (!asset) return null;
     return asset.kind === 'image' ? Infinity : asset.duration;
+  }
+
+  /** The playhead, held inside the clip, so keyframe edits always land on the clip. */
+  function editTime(clip: Clip): number {
+    return Math.min(Math.max(get().currentTime, clip.start), clip.start + clip.duration);
+  }
+
+  /** Commit `fn` applied to an editable (unlocked) clip. */
+  function editClip(clipId: string, fn: (timeline: Timeline, clip: Clip) => Timeline, coalesceKey?: string) {
+    const { timeline } = get();
+    const clip = timeline.clips.find((c) => c.id === clipId);
+    if (clip && !isClipLocked(timeline, clip)) commit(fn(timeline, clip), {}, coalesceKey && `${clipId}:${coalesceKey}`);
   }
 
   /** Place a clip (new or pasted) on the timeline, choosing its track and position. */
@@ -229,7 +252,7 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!asset) return;
       const duration = asset.kind === 'image' ? DEFAULT_IMAGE_DURATION : asset.duration;
       place(
-        { id: uid(), assetId, inPoint: 0, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP, audio: DEFAULT_AUDIO },
+        { id: uid(), assetId, inPoint: 0, speed: 1, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP, audio: DEFAULT_AUDIO },
         opts,
       );
     },
@@ -242,7 +265,7 @@ export const useEditor = create<EditorState>((set, get) => {
           : { ...BASE_TEXT, ...preset?.text };
       const transform = { ...DEFAULT_TRANSFORM, ...preset?.transform };
       place(
-        { id: uid(), text, inPoint: 0, duration: DEFAULT_TEXT_DURATION, transform, crop: NO_CROP, audio: DEFAULT_AUDIO },
+        { id: uid(), text, inPoint: 0, speed: 1, duration: DEFAULT_TEXT_DURATION, transform, crop: NO_CROP, audio: DEFAULT_AUDIO },
         opts,
       );
     },
@@ -308,18 +331,33 @@ export const useEditor = create<EditorState>((set, get) => {
       commit(next, deselect && selected?.trackId === trackId ? { selectedClipId: null } : {});
     },
 
-    updateClip: (clipId, patch, coalesceKey) => {
-      const { timeline } = get();
-      const clip = timeline.clips.find((c) => c.id === clipId);
-      if (!clip || isClipLocked(timeline, clip)) return;
-      commit(updateClipProps(timeline, clipId, patch), {}, coalesceKey && `${clipId}:${coalesceKey}`);
-    },
+    updateClip: (clipId, patch, coalesceKey) =>
+      editClip(clipId, (t, clip) => updateClipProps(t, clipId, patch, editTime(clip)), coalesceKey),
 
     updateClipLive: (clipId, patch) => {
       const { timeline, gestureBase } = get();
       const clip = timeline.clips.find((c) => c.id === clipId);
       if (!gestureBase || !clip || isClipLocked(timeline, clip)) return;
-      set({ timeline: updateClipProps(timeline, clipId, patch) });
+      set({ timeline: updateClipProps(timeline, clipId, patch, editTime(clip)) });
+    },
+
+    setSpeed: (clipId, speed, coalesceKey) =>
+      editClip(clipId, (t) => pruneEmptyTracks(setClipSpeed(t, clipId, speed, newTrack('video'))), coalesceKey),
+
+    toggleReverse: (clipId) => editClip(clipId, (t, clip) => setReversed(t, clipId, !clip.reversed)),
+
+    toggleKeyframe: (clipId) => editClip(clipId, (t, clip) => mapClip(t, clipId, (c) => toggleKeyframe(c, editTime(clip)))),
+
+    freezeFrame: () => {
+      const { timeline, currentTime, selectedClipId } = get();
+      // The selected clip if it's under the playhead, otherwise the main-track clip there.
+      const under = clipsAt(timeline, currentTime).filter(
+        (c) => !isClipLocked(timeline, c) && !c.text && assetFor(c)?.kind === 'video' && !c.audioOnly,
+      );
+      const target = under.find((c) => c.id === selectedClipId) ?? under.find((c) => c.trackId === 'main');
+      if (!target) return;
+      const freeze = uid();
+      commit(insertFreezeFrame(timeline, target.id, currentTime, { right: uid(), freeze }), { selectedClipId: freeze });
     },
 
     setBackground: (background, coalesceKey) =>

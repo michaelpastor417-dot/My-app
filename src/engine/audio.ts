@@ -13,10 +13,13 @@ export function clampAudio(audio: ClipAudio, duration: number): ClipAudio {
   return { volume, fadeIn, fadeOut };
 }
 
-/** Gain (0 to MAX_VOLUME) a clip's sound should play at, at timeline time `t`. */
-export function clipGain(clip: Clip, t: number): number {
-  if (clip.audioDetached) return 0;
-  const { volume, fadeIn, fadeOut } = clip.audio;
+/**
+ * Gain (0 to MAX_VOLUME) a clip's sound should play at, at timeline time `t`.
+ * `volume` is the clip's level at that moment (it may be keyframed).
+ */
+export function clipGain(clip: Clip, t: number, volume = clip.audio.volume): number {
+  if (clip.audioDetached || clip.freezeAt !== undefined) return 0;
+  const { fadeIn, fadeOut } = clip.audio;
   const sinceStart = t - clip.start;
   const untilEnd = clip.start + clip.duration - t;
   let gain = volume;

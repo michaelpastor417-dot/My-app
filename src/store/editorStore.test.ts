@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useEditor } from './editorStore';
 import { clipsOnTrack, createTimeline } from '../timeline/model';
+import { keyframeTimes, transformAt } from '../timeline/animation';
 import type { MediaAsset } from '../types';
 
 const video: MediaAsset = { id: 'v', name: 'v.mp4', kind: 'video', url: '', duration: 4 };
@@ -198,5 +199,48 @@ describe('editor store', () => {
     expect(s().timeline.clips[0].audio).toEqual({ volume: 2, fadeIn: 3, fadeOut: 1 });
     s().undo();
     expect(s().timeline.clips[0].audio).toEqual({ volume: 1, fadeIn: 0, fadeOut: 0 });
+  });
+
+  it('keyframes: edits at different playhead positions animate the clip', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().seek(0);
+    s().toggleKeyframe(id);
+    s().seek(2);
+    s().updateClip(id, { transform: { x: 0.5 } });
+    const clip = s().timeline.clips[0];
+    expect(clip.keyframes!.map((k) => [k.time, k.transform.x])).toEqual([[0, 0], [2, 0.5]]);
+    expect(transformAt(clip, 1).x).toBeCloseTo(0.25);
+    s().undo();
+    s().undo();
+    expect(s().timeline.clips[0].keyframes).toBeUndefined();
+  });
+
+  it('keyframe edits stay inside the clip even if the playhead is past it', () => {
+    s().addToTimeline('v');
+    s().addToTimeline('p');
+    const photo = s().selectedClipId!;
+    s().toggleKeyframe(photo); // playhead at 0 -> held to the photo's start (4s)
+    expect(keyframeTimes(s().timeline.clips.find((c) => c.id === photo)!)).toEqual([4]);
+  });
+
+  it('changes speed, ripples, and undoes a slider drag in one step', () => {
+    s().addToTimeline('v');
+    s().addToTimeline('p');
+    const id = s().timeline.clips.find((c) => c.assetId === 'v')!.id;
+    s().setSpeed(id, 1.5, 'speed');
+    s().setSpeed(id, 2, 'speed');
+    expect(mainStarts()).toEqual([[0, 2], [2, 3]]);
+    s().undo();
+    expect(mainStarts()).toEqual([[0, 4], [4, 3]]);
+  });
+
+  it('inserts a freeze frame at the playhead and selects it', () => {
+    s().addToTimeline('v');
+    s().select(null);
+    s().seek(1);
+    s().freezeFrame();
+    expect(mainStarts()).toEqual([[0, 1], [1, 3], [4, 3]]);
+    expect(s().timeline.clips.find((c) => c.id === s().selectedClipId)!.freezeAt).toBe(1);
   });
 });

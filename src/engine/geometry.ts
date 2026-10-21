@@ -96,17 +96,19 @@ export function clampCrop(crop: Crop): Crop {
 /**
  * On-canvas box for any visual clip: media is fitted to the canvas, text is
  * sized by its layout. Returns null when the clip has nothing to show.
+ * Pass `transform` for an animated clip's values at a given moment.
  */
 export function rectForClip(
   clip: Clip,
   assets: MediaAsset[],
   canvasW: number,
   canvasH: number,
+  transform: Transform = clip.transform,
   measure: MeasureText = measureWithCanvas,
 ): ClipRect | null {
   if (clip.text) {
     const layout = layoutText(clip.text, canvasW, canvasH, measure);
-    const { x, y, scale, rotation } = clip.transform;
+    const { x, y, scale, rotation } = transform;
     return {
       cx: canvasW / 2 + x * canvasW,
       cy: canvasH / 2 + y * canvasH,
@@ -117,5 +119,5 @@ export function rectForClip(
   }
   const asset = assets.find((a) => a.id === clip.assetId);
   if (!asset || asset.kind === 'audio') return null;
-  return clipRect(asset, clip.transform, clip.crop, canvasW, canvasH);
+  return clipRect(asset, transform, clip.crop, canvasW, canvasH);
 }

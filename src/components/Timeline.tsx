@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_ZOOM, MIN_ZOOM, isClipLocked, useEditor } from '../store/editorStore';
-import { clipEnd, timelineDuration } from '../timeline/model';
+import { clipEnd, clipsAt, timelineDuration } from '../timeline/model';
+import { keyframeTimes } from '../timeline/animation';
 import { formatTime } from '../utils/time';
 import { trackDrag } from '../utils/drag';
 import { Waveform } from './Waveform';
@@ -50,13 +51,28 @@ export function Timeline() {
   const isPlaying = useEditor((s) => s.isPlaying);
   const selectedClipId = useEditor((s) => s.selectedClipId);
   const canUndo = useEditor((s) => s.past.length > 0);
+  const canFreeze = useEditor((s) =>
+    clipsAt(s.timeline, s.currentTime).some(
+      (c) => !c.text && !c.audioOnly && c.freezeAt === undefined && s.assets.find((a) => a.id === c.assetId)?.kind === 'video',
+    ),
+  );
   const canRedo = useEditor((s) => s.future.length > 0);
   const selectedLocked = useEditor((s) => {
     const clip = s.timeline.clips.find((c) => c.id === s.selectedClipId);
     return !clip || isClipLocked(s.timeline, clip);
   });
-  const { seek, select, deleteSelected, addToTimeline, moveClip, undo, redo, splitAtPlayhead, duplicateSelected } =
-    useEditor.getState();
+  const {
+    seek,
+    select,
+    deleteSelected,
+    addToTimeline,
+    moveClip,
+    undo,
+    redo,
+    splitAtPlayhead,
+    duplicateSelected,
+    freezeFrame,
+  } = useEditor.getState();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -227,6 +243,9 @@ export function Timeline() {
         <button className="tool-btn" onClick={duplicateSelected} disabled={selectedLocked} title="Duplicate (Ctrl+D)">
           ⧉ Duplicate
         </button>
+        <button className="tool-btn" onClick={freezeFrame} disabled={!canFreeze} title="Freeze the frame at the playhead">
+          ❄ Freeze
+        </button>
         <div className="toolbar-divider" />
         <VoiceoverButton />
         <div className="toolbar-spacer" />
@@ -391,7 +410,7 @@ function TrackRow(props: {
           const width = Math.max(4, clip.duration * zoom);
           // Audio clips show a full-height waveform; video clips a strip along the bottom unless detached.
           const waveHeight = soundOnly ? 30 : 14;
-          const showWave = !!asset?.peaks?.length && !clip.audioDetached;
+          const showWave = !!asset?.peaks?.length && !clip.audioDetached && clip.freezeAt === undefined;
           const kindClass = clip.text ? 'text' : soundOnly ? 'audio' : (asset?.kind ?? '');
           return (
             <div
@@ -413,7 +432,7 @@ function TrackRow(props: {
                   <Waveform
                     peaks={asset.peaks!}
                     from={clip.inPoint}
-                    to={clip.inPoint + clip.duration}
+                    to={clip.inPoint + clip.duration * clip.speed}
                     width={width}
                     height={waveHeight}
                   />
@@ -421,9 +440,15 @@ function TrackRow(props: {
               )}
               <span className="clip-label">
                 {clip.audioDetached && <span title="Audio detached">🔇 </span>}
+                {clip.freezeAt !== undefined && <span title="Freeze frame">❄ </span>}
+                {clip.reversed && <span title="Reversed">⇄ </span>}
+                {clip.speed !== 1 && <span className="clip-badge">{Math.round(clip.speed * 100) / 100}× </span>}
                 {clip.text ? clip.text.content.split('\n')[0] || 'Text' : asset?.name} · {formatTime(clip.duration)}
-                {!clip.text && !clip.audioDetached && clip.audio.volume !== 1 && ` · ${Math.round(clip.audio.volume * 100)}%`}
+                {!clip.text && !clip.audioDetached && clip.freezeAt === undefined && clip.audio.volume !== 1 && ` · ${Math.round(clip.audio.volume * 100)}%`}
               </span>
+              {keyframeTimes(clip).map((t, i) => (
+                <span key={i} className="keyframe-diamond" style={{ left: (t - clip.start) * zoom }} />
+              ))}
               {selected && !track.locked && !dragging && (
                 <>
                   {trimHandle(clip, 'start')}

@@ -2,6 +2,7 @@ import type { Clip, MediaAsset, Timeline } from '../types';
 import { clipsAt, timelineDuration } from '../timeline/model';
 import { clipRect, cropRect } from './geometry';
 import { clipGain } from './audio';
+import { mediaTimeAt, transformAt, volumeAt } from '../timeline/animation';
 import { animateText, layoutText, measureWithCanvas, paintText, revealLines } from './text';
 import { useEditor } from '../store/editorStore';
 
@@ -139,23 +140,28 @@ export class PlaybackEngine {
         if (!el.paused) el.pause();
         // Pre-seek clips that are about to start so cuts don't flash black while they seek.
         const lead = clip.start - t;
-        if (lead > 0 && lead < PRE_ROLL && !el.seeking && Math.abs(el.currentTime - clip.inPoint) > PAUSED_DRIFT_TOLERANCE) {
-          el.currentTime = clip.inPoint;
+        const first = mediaTimeAt(clip, clip.start);
+        if (lead > 0 && lead < PRE_ROLL && !el.seeking && Math.abs(el.currentTime - first) > PAUSED_DRIFT_TOLERANCE) {
+          el.currentTime = first;
         }
         continue;
       }
 
       const track = timeline.tracks.find((tr) => tr.id === clip.trackId);
+      // Browsers can't play media backwards, so reversed clips step frame by frame and stay silent in preview.
+      const stepped = clip.reversed || clip.freezeAt !== undefined;
       const gain = this.gains.get(clip.id);
       if (gain && this.audioCtx) {
-        const target = track?.muted ? 0 : clipGain(clip, t);
-        gain.gain.setTargetAtTime(target, this.audioCtx.currentTime, GAIN_SMOOTHING);
+        const level = track?.muted || stepped ? 0 : clipGain(clip, t, volumeAt(clip, t));
+        gain.gain.setTargetAtTime(level, this.audioCtx.currentTime, GAIN_SMOOTHING);
       }
-      const target = clip.inPoint + (t - clip.start);
+      const target = mediaTimeAt(clip, t);
       const drift = Math.abs(el.currentTime - target);
 
-      if (playing) {
-        if (drift > PLAYING_DRIFT_TOLERANCE) el.currentTime = target;
+      if (playing && !stepped) {
+        if (el.playbackRate !== clip.speed) el.playbackRate = clip.speed;
+        // A sped-up clip drifts further between frames, so allow proportionally more.
+        if (drift > PLAYING_DRIFT_TOLERANCE * Math.max(1, clip.speed)) el.currentTime = target;
         if (el.paused) el.play().catch(() => {});
       } else {
         if (!el.paused) el.pause();
@@ -181,7 +187,7 @@ export class PlaybackEngine {
           continue;
         }
         const frame = this.drawable(clip, assets);
-        if (frame) this.drawClip(clip, frame.el, frame.asset);
+        if (frame) this.drawClip(clip, frame.el, frame.asset, t);
       }
     }
   }
@@ -196,12 +202,13 @@ export class PlaybackEngine {
     return { el, asset };
   }
 
-  private drawClip(clip: Clip, el: CanvasImageSource, asset: MediaAsset) {
+  private drawClip(clip: Clip, el: CanvasImageSource, asset: MediaAsset, t: number) {
     const { ctx, canvas } = this;
-    const rect = clipRect(asset, clip.transform, clip.crop, canvas.width, canvas.height);
+    const transform = transformAt(clip, t);
+    const rect = clipRect(asset, transform, clip.crop, canvas.width, canvas.height);
     const src = cropRect(asset.width ?? canvas.width, asset.height ?? canvas.height, clip.crop);
     ctx.save();
-    ctx.globalAlpha = clip.transform.opacity;
+    ctx.globalAlpha = transform.opacity;
     ctx.translate(rect.cx, rect.cy);
     ctx.rotate((rect.rotation * Math.PI) / 180);
     ctx.drawImage(el, src.sx, src.sy, src.sw, src.sh, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
@@ -213,7 +220,7 @@ export class PlaybackEngine {
     const { ctx, canvas } = this;
     const layout = layoutText(text, canvas.width, canvas.height, measureWithCanvas);
     const anim = animateText(clip, text, t);
-    const { x, y, scale, rotation, opacity } = clip.transform;
+    const { x, y, scale, rotation, opacity } = transformAt(clip, t);
     ctx.save();
     ctx.globalAlpha = opacity * anim.opacity;
     ctx.translate(

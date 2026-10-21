@@ -4,6 +4,14 @@ import { formatTime } from '../utils/time';
 import type { CanvasBackground, Clip, ClipAudio, Crop, MediaAsset, TextAnimationIn, TextAnimationOut, TextData } from '../types';
 import { FONT_FAMILIES } from '../engine/text';
 import { MAX_VOLUME } from '../engine/audio';
+import {
+  MAX_SPEED,
+  MIN_SPEED,
+  keyframeIndexAt,
+  keyframeTimes,
+  transformAt,
+  volumeAt,
+} from '../timeline/animation';
 import { TEXT_INPUT_ID } from './TransformOverlay';
 
 type TextProps = { clip: Clip; text: TextData };
@@ -199,6 +207,7 @@ export function Inspector() {
             </dl>
             {locked && <p className="empty-hint">This clip's track is locked.</p>}
             <fieldset disabled={locked}>
+              <KeyframeBar clip={clip} />
               <TextSection clip={clip} text={clip.text} />
               <TextStyleSection clip={clip} text={clip.text} />
               <AnimationSection clip={clip} text={clip.text} />
@@ -227,6 +236,9 @@ export function Inspector() {
             </dl>
             {locked && <p className="empty-hint">This clip's track is locked.</p>}
             <fieldset disabled={locked}>
+              <KeyframeBar clip={clip} />
+              {clip.freezeAt !== undefined && <p className="empty-hint">Freeze frame: a still of one moment.</p>}
+              <SpeedSection clip={clip} asset={asset} />
               <AudioSection clip={clip} asset={asset} />
               {asset.kind !== 'audio' && !clip.audioOnly && (
                 <>
@@ -242,13 +254,103 @@ export function Inspector() {
   );
 }
 
+/** The playhead held inside the clip: the moment the panel shows and edits. */
+function playheadIn(clip: Clip, time: number): number {
+  return Math.min(Math.max(time, clip.start), clip.start + clip.duration);
+}
+
+/** Previous / add-remove / next keyframe controls, CapCut's ◆ button. */
+function KeyframeBar({ clip }: { clip: Clip }) {
+  const currentTime = useEditor((s) => s.currentTime);
+  const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
+  const seek = useEditor((s) => s.seek);
+  const times = keyframeTimes(clip);
+  const onKeyframe = keyframeIndexAt(clip, playheadIn(clip, currentTime)) >= 0;
+  const inside = currentTime >= clip.start && currentTime <= clip.start + clip.duration;
+  const prev = [...times].reverse().find((t) => t < currentTime - 1e-3);
+  const next = times.find((t) => t > currentTime + 1e-3);
+
+  return (
+    <section className="inspector-section keyframe-bar">
+      <span className="keyframe-label">Keyframes{times.length > 0 && ` · ${times.length}`}</span>
+      <button className="kf-nav" disabled={prev === undefined} onClick={() => seek(prev!)} title="Previous keyframe">
+        ◀
+      </button>
+      <button
+        className={`kf-toggle ${onKeyframe ? 'on' : ''}`}
+        onClick={() => toggleKeyframe(clip.id)}
+        disabled={!inside}
+        title={
+          !inside
+            ? 'Move the playhead onto this clip to add keyframes'
+            : onKeyframe
+              ? 'Remove keyframe'
+              : 'Add keyframe at the playhead'
+        }
+      >
+        ◆
+      </button>
+      <button className="kf-nav" disabled={next === undefined} onClick={() => seek(next!)} title="Next keyframe">
+        ▶
+      </button>
+    </section>
+  );
+}
+
+const SPEED_PRESETS = [0.25, 0.5, 1, 1.5, 2, 4];
+
+function SpeedSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
+  const setSpeed = useEditor((s) => s.setSpeed);
+  const toggleReverse = useEditor((s) => s.toggleReverse);
+  if (asset.kind === 'image' || clip.freezeAt !== undefined) return null;
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Speed</h4>
+        {asset.kind === 'video' && !clip.audioOnly && (
+          <label className="checkbox-field">
+            <input type="checkbox" checked={!!clip.reversed} onChange={() => toggleReverse(clip.id)} />
+            Reverse
+          </label>
+        )}
+      </header>
+      <div className="segmented speed-presets">
+        {SPEED_PRESETS.map((speed) => (
+          <button key={speed} className={clip.speed === speed ? 'active' : ''} onClick={() => setSpeed(clip.id, speed)}>
+            {speed}×
+          </button>
+        ))}
+      </div>
+      <label className="field number-field speed-field">
+        <span>Speed</span>
+        <input
+          type="number"
+          min={MIN_SPEED}
+          max={MAX_SPEED}
+          step={0.1}
+          value={Math.round(clip.speed * 100) / 100}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (e.target.value !== '' && v > 0) setSpeed(clip.id, v, 'speed');
+          }}
+        />
+      </label>
+      <p className="section-note">
+        Duration {formatTime(clip.duration, true)}
+        {clip.reversed && ' · reversed clips are silent in the preview'}
+      </p>
+    </section>
+  );
+}
+
 /** Rounds to one decimal place for display in the fade fields. */
 const tenths = (v: number) => Math.round(v * 10) / 10;
 
 function AudioSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
   const updateClip = useEditor((s) => s.updateClip);
   const detachAudio = useEditor((s) => s.detachAudio);
-  if (asset.kind === 'image') return null;
+  const volume = useEditor((s) => volumeAt(clip, playheadIn(clip, s.currentTime)));
+  if (asset.kind === 'image' || clip.freezeAt !== undefined) return null;
   const decoding = asset.peaks === undefined;
   const silent = asset.peaks?.length === 0;
   const set = (key: string, audio: Partial<ClipAudio>) => updateClip(clip.id, { audio }, key);
@@ -275,7 +377,7 @@ function AudioSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
             unit="%"
             min={0}
             max={MAX_VOLUME * 100}
-            value={Math.round(clip.audio.volume * 100)}
+            value={Math.round(volume * 100)}
             onChange={(v) => set('volume', { volume: v / 100 })}
           />
           <SliderField
@@ -305,7 +407,9 @@ function AudioSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
 function TransformSection({ clip }: { clip: Clip }) {
   const updateClip = useEditor((s) => s.updateClip);
   const [canvasW, canvasH] = useEditor((s) => ASPECT_RATIOS[s.aspectRatio]);
-  const t = clip.transform;
+  // Select the time, not the transform: interpolated transforms are new objects every call.
+  const currentTime = useEditor((s) => s.currentTime);
+  const t = transformAt(clip, playheadIn(clip, currentTime));
   const set = (key: string, transform: Partial<Clip['transform']>) => updateClip(clip.id, { transform }, key);
 
   return (

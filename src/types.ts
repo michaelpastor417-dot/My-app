@@ -95,6 +95,17 @@ export interface ClipAudio {
   fadeOut: number;
 }
 
+/**
+ * A snapshot of a clip's animatable values at one moment. `time` is clip-local
+ * time (see clipLocalTime), so keyframes stay attached to the same moment of
+ * the content when the clip is trimmed, split or sped up.
+ */
+export interface Keyframe {
+  time: number;
+  transform: Transform;
+  volume: number;
+}
+
 /** What fills the canvas where the main-track media doesn't cover it. */
 export type CanvasBackground = { type: 'color'; color: string } | { type: 'blur'; amount: number };
 
@@ -109,6 +120,14 @@ export interface Clip {
   start: number;
   /** Offset into the source media where playback begins. */
   inPoint: number;
+  /** Playback speed; the clip covers `duration * speed` seconds of source. */
+  speed: number;
+  /** Plays the covered source span backwards. */
+  reversed?: boolean;
+  /** Shows this single source frame for the clip's whole duration (a freeze frame). */
+  freezeAt?: number;
+  /** Sorted by time. When present, transform and volume come from these instead of `transform`/`audio.volume`. */
+  keyframes?: Keyframe[];
   /** Length of the clip on the timeline. */
   duration: number;
   /** Ignored for audio clips. */

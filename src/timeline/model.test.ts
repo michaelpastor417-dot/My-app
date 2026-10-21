@@ -8,8 +8,11 @@ import {
   clipsAt,
   clipsOnTrack,
   createTimeline,
+  FREEZE_DURATION,
   detachAudio,
   duplicateClip,
+  insertFreezeFrame,
+  setClipSpeed,
   findFreeStart,
   insertClip,
   moveClip,
@@ -27,6 +30,7 @@ const clip = (id: string, duration: number, trackId = 'main', start = 0): Clip =
   trackId,
   start,
   inPoint: 0,
+  speed: 1,
   duration,
   transform: DEFAULT_TRANSFORM,
   crop: NO_CROP,
@@ -194,7 +198,8 @@ describe('trimClip', () => {
     let t = insertClip(createTimeline(), clip('img', 3));
     t = trimClip(t, 'img', 'end', 20, Infinity);
     t = trimClip(t, 'img', 'start', -4, Infinity);
-    expect(clipsOnTrack(t, 'main')[0]).toMatchObject({ start: 0, inPoint: 0, duration: 24 });
+    // The in point moves into negative "virtual" time so keyframes stay put.
+    expect(clipsOnTrack(t, 'main')[0]).toMatchObject({ start: 0, inPoint: -4, duration: 24 });
   });
 });
 
@@ -261,5 +266,68 @@ describe('audio', () => {
     expect(clipsOnTrack(t, 'au')[0]).toMatchObject({ id: 'v-audio', start: 2, inPoint: 1, duration: 3, audioOnly: true });
     // Detaching twice does nothing.
     expect(detachAudio(t, 'v', 'again', { ...audio, id: 'au2' })).toBe(t);
+  });
+});
+
+describe('speed', () => {
+  it('halving the speed doubles the length and ripples the main track', () => {
+    let t = insertClip(createTimeline(), clip('a', 2));
+    t = insertClip(t, clip('b', 2));
+    t = setClipSpeed(t, 'a', 0.5, overlay);
+    expect(clipsOnTrack(t, 'main').map((c) => [c.id, c.start, c.duration])).toEqual([['a', 0, 4], ['b', 4, 2]]);
+  });
+
+  it('moves an overlay clip to a new track when it would overlap', () => {
+    let t = addTrack(createTimeline(), overlay);
+    t = insertClip(t, clip('a', 2, 'ov'), 0);
+    t = insertClip(t, clip('b', 2, 'ov'), 3);
+    t = setClipSpeed(t, 'a', 0.5, { ...overlay, id: 'spare' });
+    expect(t.clips.find((c) => c.id === 'a')).toMatchObject({ trackId: 'spare', duration: 4 });
+    expect(t.tracks.map((tr) => tr.id)).toEqual(['spare', 'ov', 'main']);
+  });
+
+  it('split and trim respect speed', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 2), speed: 2 }); // covers source 0..4
+    t = splitClip(t, 'a', 1, 'b');
+    expect(clipsOnTrack(t, 'main')[1]).toMatchObject({ inPoint: 2, duration: 1 });
+    t = trimClip(t, 'b', 'end', 99, 5); // 1s of source left after 4 -> 0.5s at 2x
+    expect(clipsOnTrack(t, 'main')[1].duration).toBeCloseTo(1.5);
+  });
+});
+
+describe('reverse', () => {
+  it('splits so the left half covers the later source', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), inPoint: 1, reversed: true }); // source 1..5
+    t = splitClip(t, 'a', 1, 'b');
+    const [a, b] = clipsOnTrack(t, 'main');
+    expect(a).toMatchObject({ inPoint: 4, duration: 1 }); // plays source 5 -> 4
+    expect(b).toMatchObject({ inPoint: 1, duration: 3 }); // plays source 4 -> 1
+  });
+
+  it('trimming the end of a reversed clip eats into the start of its source', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), inPoint: 1, reversed: true }); // source 1..5
+    t = trimClip(t, 'a', 'end', 3, 10);
+    expect(clipsOnTrack(t, 'main')[0]).toMatchObject({ inPoint: 2, duration: 3 });
+    t = trimClip(t, 'a', 'end', 10, 10); // can grow back only until source 0
+    expect(clipsOnTrack(t, 'main')[0]).toMatchObject({ inPoint: 0, duration: 5 });
+  });
+});
+
+describe('insertFreezeFrame', () => {
+  it('splits the main-track clip and holds the frame at the playhead', () => {
+    let t = insertClip(createTimeline(), { ...clip('a', 4), inPoint: 10 });
+    t = insertClip(t, clip('b', 1));
+    t = insertFreezeFrame(t, 'a', 1.5, { right: 'a2', freeze: 'f' });
+    const ids = clipsOnTrack(t, 'main').map((c) => [c.id, c.start]);
+    expect(ids).toEqual([['a', 0], ['f', 1.5], ['a2', 1.5 + FREEZE_DURATION], ['b', 4 + FREEZE_DURATION]]);
+    expect(t.clips.find((c) => c.id === 'f')).toMatchObject({ freezeAt: 11.5, audio: { volume: 0 } });
+  });
+
+  it('ripples later overlay clips to make room', () => {
+    let t = addTrack(createTimeline(), overlay);
+    t = insertClip(t, clip('a', 2, 'ov'), 0);
+    t = insertClip(t, clip('b', 1, 'ov'), 5);
+    t = insertFreezeFrame(t, 'a', 1, { right: 'a2', freeze: 'f' });
+    expect(clipsOnTrack(t, 'ov').map((c) => [c.id, c.start])).toEqual([['a', 0], ['f', 1], ['a2', 4], ['b', 8]]);
   });
 });

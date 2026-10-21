@@ -18,6 +18,7 @@ npm run build      # typecheck + production build
 | Data model | `src/types.ts`, `src/timeline/model.ts` | Media assets, tracks and clips. Timeline operations are pure functions (no mutation), which makes undo/redo and export straightforward. |
 | State | `src/store/editorStore.ts` | Zustand store: library, timeline, playhead, selection, zoom, canvas ratio. |
 | Playback engine | `src/engine/PlaybackEngine.ts` | Master clock plus one media element per clip, kept in sync with the clock; composites visible clips onto the preview canvas every frame. |
+| Clip time & keyframes | `src/timeline/animation.ts` | Maps timeline time to media time (speed, reverse, freeze) and interpolates keyframes; keyframes live in media time so trims, splits and speed changes keep them on the same frames. |
 | Audio | `src/engine/audio.ts` | Volume/fade gain curve, waveform peak extraction and resampling (pure, tested). Playback routes every clip through a Web Audio gain node. |
 | Text | `src/engine/text.ts`, `src/timeline/textPresets.ts` | Text layout, drawing and in/out animations (pure, tested); preset styles and stickers. |
 | Geometry | `src/engine/geometry.ts` | Where each clip lands on the canvas (transform + crop), hit testing and rotation maths, shared by the renderer and the player's handles. |
@@ -39,7 +40,7 @@ Timeline rules (matching CapCut):
 - [x] **Step 3: Transform & canvas.** Move/scale/rotate clips directly on the player (centre snapping, 90° rotation snapping), opacity, crop, canvas background (colour or blurred video), properties panel with numeric controls.
 - [x] **Step 4: Text & stickers.** Text presets (title, subtitle, outline, boxed, typewriter, pop…), font/size/colour/bold/italic/alignment, outline, shadow, background box, in/out animations (fade, slide, pop, typewriter), emoji stickers; edited in the Properties panel and moved/scaled/rotated on the player.
 - [x] **Step 5: Audio.** Waveforms on audio and video clips, per-clip volume (0–200%), fade in/out, detach audio from video, voiceover recording from the microphone, Audio tab.
-- [ ] **Step 6: Speed & keyframes.** Constant/curve speed, reverse, freeze frame, keyframe animation.
+- [x] **Step 6: Speed & keyframes.** Speed 0.1×–10× (presets or exact), reverse, freeze frame, keyframe animation of position/scale/rotation/opacity/volume with CapCut-style auto-keyframing, keyframe navigation and timeline diamonds. (Speed curves come later.)
 - [ ] **Step 7: Effects, filters, transitions.** WebGL render pipeline, color adjustments, transitions between main-track clips.
 - [ ] **Step 8: Export.** Frame-accurate offline render with WebCodecs → MP4, resolution/fps/quality options.
 - [ ] **Step 9: Projects.** Save/load projects locally (IndexedDB), autosave, drafts list.

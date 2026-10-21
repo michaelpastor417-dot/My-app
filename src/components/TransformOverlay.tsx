@@ -3,6 +3,7 @@ import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
 import { clipsAt } from '../timeline/model';
 import { angleAround, hitTest, normalizeAngle, rectForClip, snapRotation } from '../engine/geometry';
 import { trackDrag } from '../utils/drag';
+import { transformAt } from '../timeline/animation';
 import type { Clip, Timeline } from '../types';
 
 /** id of the Properties panel's text box, focused when text is double-clicked in the player. */
@@ -38,7 +39,9 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
   const [guides, setGuides] = useState<{ v: boolean; h: boolean }>({ v: false, h: false });
   const [rotating, setRotating] = useState(false);
 
-  const rectOf = (clip: Clip) => rectForClip(clip, assets, canvasW, canvasH);
+  // Keyframed clips are edited as they appear at the playhead.
+  const transformOf = (clip: Clip) => transformAt(clip, currentTime);
+  const rectOf = (clip: Clip) => rectForClip(clip, assets, canvasW, canvasH, transformOf(clip));
 
   const visible = visibleClipsTopFirst(timeline, currentTime);
   const selected = visible.find((c) => c.id === selectedClipId);
@@ -77,7 +80,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
     store.select(hit.id);
 
     // Move: drag the clip, snapping its centre to the canvas centre lines.
-    const { x: x0, y: y0 } = hit.transform;
+    const { x: x0, y: y0 } = transformOf(hit);
     const startX = e.clientX;
     const startY = e.clientY;
     const snapX = CENTER_SNAP_PX / displayScale / canvasW;
@@ -102,7 +105,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
     e.stopPropagation();
     const center = canvasToClient(e.currentTarget, selectedRect.cx, selectedRect.cy);
     const startDist = Math.hypot(e.clientX - center.x, e.clientY - center.y) || 1;
-    const scale0 = selected.transform.scale;
+    const scale0 = transformOf(selected).scale;
     gesture((ev) => {
       const dist = Math.hypot(ev.clientX - center.x, ev.clientY - center.y);
       const scale = Math.max(MIN_SCALE, (scale0 * dist) / startDist);
@@ -115,7 +118,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
     e.stopPropagation();
     const center = canvasToClient(e.currentTarget, selectedRect.cx, selectedRect.cy);
     const angle0 = angleAround(center.x, center.y, e.clientX, e.clientY);
-    const rotation0 = selected.transform.rotation;
+    const rotation0 = transformOf(selected).rotation;
     setRotating(true);
     gesture(
       (ev) => {
@@ -167,7 +170,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
               </div>
               {rotating && (
                 <div className="rotation-badge" style={{ transform: `rotate(${-selectedRect.rotation}deg)` }}>
-                  {Math.round(selected.transform.rotation)}°
+                  {Math.round(transformOf(selected).rotation)}°
                 </div>
               )}
             </>

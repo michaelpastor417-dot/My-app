@@ -10,7 +10,7 @@ const measure = (s: string, font: string) => {
   return s.length * px * 0.5;
 };
 
-const clip: Clip = { id: 't', trackId: 'tx', start: 10, inPoint: 0, duration: 3, transform: DEFAULT_TRANSFORM, crop: NO_CROP, audio: DEFAULT_AUDIO };
+const clip: Clip = { id: 't', trackId: 'tx', start: 10, inPoint: 0, speed: 1, duration: 3, transform: DEFAULT_TRANSFORM, crop: NO_CROP, audio: DEFAULT_AUDIO };
 const text = (patch: Partial<TextData>): TextData => ({ ...BASE_TEXT, ...patch });
 
 describe('fontPx', () => {
