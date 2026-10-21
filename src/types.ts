@@ -15,7 +15,8 @@ export interface MediaAsset {
   thumbnail?: string;
 }
 
-export type TrackKind = 'video' | 'audio';
+/** Text tracks hold text and sticker clips and always draw above video tracks. */
+export type TrackKind = 'video' | 'audio' | 'text';
 
 /**
  * A track is a horizontal lane on the timeline.
@@ -56,13 +57,39 @@ export interface Crop {
   bottom: number;
 }
 
+export type TextAnimationIn = 'none' | 'fade' | 'slide-up' | 'pop' | 'typewriter';
+export type TextAnimationOut = 'none' | 'fade' | 'slide-down' | 'pop';
+
+/** Content and styling of a text (or emoji sticker) clip. */
+export interface TextData {
+  content: string;
+  fontFamily: string;
+  /** Size in points; one point is 1/1080 of the canvas's shorter side, so text looks the same at any ratio. */
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: 'left' | 'center' | 'right';
+  strokeColor: string;
+  /** Outline thickness as a fraction of the font size; 0 for none. */
+  strokeWidth: number;
+  shadow: boolean;
+  backgroundColor: string;
+  /** 0 hides the background box. */
+  backgroundOpacity: number;
+  animationIn: TextAnimationIn;
+  animationOut: TextAnimationOut;
+}
+
 /** What fills the canvas where the main-track media doesn't cover it. */
 export type CanvasBackground = { type: 'color'; color: string } | { type: 'blur'; amount: number };
 
 /** A placed piece of media on the timeline. All times are in seconds. */
 export interface Clip {
   id: string;
-  assetId: string;
+  /** Media clips reference an imported asset; text clips have `text` instead. */
+  assetId?: string;
+  text?: TextData;
   trackId: string;
   /** Where the clip begins on the timeline. */
   start: number;

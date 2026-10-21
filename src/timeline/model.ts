@@ -1,4 +1,4 @@
-import type { CanvasBackground, Clip, Crop, Timeline, Track, Transform } from '../types';
+import type { CanvasBackground, Clip, Crop, TextData, Timeline, Track, Transform } from '../types';
 import { clampCrop } from '../engine/geometry';
 
 /**
@@ -79,11 +79,17 @@ export function findFreeStart(
   return start;
 }
 
+/**
+ * Add a track in its layer: text tracks go on top of everything, new video
+ * tracks above other video but below text, and audio at the bottom.
+ */
 export function addTrack(timeline: Timeline, track: Track): Timeline {
-  // New overlay tracks go above existing ones, except audio which stacks below the main track.
-  const tracks =
-    track.kind === 'audio' ? [...timeline.tracks, track] : [track, ...timeline.tracks];
-  return { ...timeline, tracks };
+  const { tracks } = timeline;
+  if (track.kind === 'audio') return { ...timeline, tracks: [...tracks, track] };
+  if (track.kind === 'text') return { ...timeline, tracks: [track, ...tracks] };
+  const firstNonText = tracks.findIndex((t) => t.kind !== 'text');
+  const at = firstNonText === -1 ? tracks.length : firstNonText;
+  return { ...timeline, tracks: [...tracks.slice(0, at), track, ...tracks.slice(at)] };
 }
 
 /**
@@ -257,4 +263,12 @@ export function updateClipVisual(timeline: Timeline, clipId: string, patch: Clip
 
 export function setBackground(timeline: Timeline, background: CanvasBackground): Timeline {
   return { ...timeline, background };
+}
+
+/** Change a text clip's content or styling. */
+export function updateClipText(timeline: Timeline, clipId: string, patch: Partial<TextData>): Timeline {
+  return {
+    ...timeline,
+    clips: timeline.clips.map((c) => (c.id === clipId && c.text ? { ...c, text: { ...c.text, ...patch } } : c)),
+  };
 }

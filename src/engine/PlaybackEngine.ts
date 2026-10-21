@@ -1,6 +1,7 @@
 import type { Clip, MediaAsset, Timeline } from '../types';
 import { clipsAt, timelineDuration } from '../timeline/model';
 import { clipRect, cropRect } from './geometry';
+import { animateText, layoutText, measureWithCanvas, paintText, revealLines } from './text';
 import { useEditor } from '../store/editorStore';
 
 /** Max drift (seconds) between a playing media element and the master clock before we re-seek it. */
@@ -62,7 +63,7 @@ export class PlaybackEngine {
     const { timeline, assets, currentTime, isPlaying } = useEditor.getState();
     const active = clipsAt(timeline, currentTime);
     this.syncMedia(timeline, active, currentTime, isPlaying);
-    this.draw(timeline, assets, active);
+    this.draw(timeline, assets, active, currentTime);
     this.rafId = requestAnimationFrame(this.frame);
   };
 
@@ -77,7 +78,7 @@ export class PlaybackEngine {
       }
     }
     for (const clip of timeline.clips) {
-      if (this.elements.has(clip.id)) continue;
+      if (!clip.assetId || this.elements.has(clip.id)) continue;
       const asset = assets.find((a) => a.id === clip.assetId);
       if (asset) this.elements.set(clip.id, this.createElement(asset));
     }
@@ -135,7 +136,7 @@ export class PlaybackEngine {
     }
   }
 
-  private draw(timeline: Timeline, assets: MediaAsset[], active: Clip[]) {
+  private draw(timeline: Timeline, assets: MediaAsset[], active: Clip[], t: number) {
     const { ctx, canvas } = this;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -144,9 +145,13 @@ export class PlaybackEngine {
     // Tracks are listed top to bottom; paint bottom-up so upper tracks cover lower ones.
     for (let i = timeline.tracks.length - 1; i >= 0; i--) {
       const track = timeline.tracks[i];
-      if (track.kind !== 'video' || track.hidden) continue;
+      if (track.kind === 'audio' || track.hidden) continue;
       for (const clip of active) {
         if (clip.trackId !== track.id) continue;
+        if (clip.text) {
+          this.drawText(clip, t);
+          continue;
+        }
         const frame = this.drawable(clip, assets);
         if (frame) this.drawClip(clip, frame.el, frame.asset);
       }
@@ -172,6 +177,24 @@ export class PlaybackEngine {
     ctx.translate(rect.cx, rect.cy);
     ctx.rotate((rect.rotation * Math.PI) / 180);
     ctx.drawImage(el, src.sx, src.sy, src.sw, src.sh, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
+    ctx.restore();
+  }
+
+  private drawText(clip: Clip, t: number) {
+    const text = clip.text!;
+    const { ctx, canvas } = this;
+    const layout = layoutText(text, canvas.width, canvas.height, measureWithCanvas);
+    const anim = animateText(clip, text, t);
+    const { x, y, scale, rotation, opacity } = clip.transform;
+    ctx.save();
+    ctx.globalAlpha = opacity * anim.opacity;
+    ctx.translate(
+      canvas.width / 2 + x * canvas.width,
+      canvas.height / 2 + y * canvas.height + anim.offsetY * layout.height * scale,
+    );
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.scale(scale * anim.scale, scale * anim.scale);
+    paintText(ctx, text, layout, revealLines(layout.lines, anim.visibleChars));
     ctx.restore();
   }
 

@@ -3,12 +3,104 @@ import { useEditor } from '../store/editorStore';
 import { importFile } from '../utils/media';
 import { formatTime } from '../utils/time';
 import type { MediaAsset } from '../types';
+import { BASE_TEXT } from '../engine/text';
+import { STICKERS, TEXT_PRESETS } from '../timeline/textPresets';
 
 export const ASSET_DRAG_TYPE = 'application/x-clipforge-asset';
+/** Drag payload for text presets and stickers: JSON of the `addText` source. */
+export const TEXT_DRAG_TYPE = 'application/x-clipforge-text';
 
 const TABS = ['Media', 'Audio', 'Text', 'Stickers', 'Effects', 'Transitions', 'Filters'] as const;
+type Tab = (typeof TABS)[number];
+const READY_TABS: Tab[] = ['Media', 'Text', 'Stickers'];
 
 export function MediaPanel() {
+  const [tab, setTab] = useState<Tab>('Media');
+  return (
+    <aside className="panel media-panel">
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            className={`tab ${t === tab ? 'active' : ''}`}
+            disabled={!READY_TABS.includes(t)}
+            title={READY_TABS.includes(t) ? undefined : 'Coming in a later step'}
+            onClick={() => setTab(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+      {tab === 'Media' && <MediaLibrary />}
+      {tab === 'Text' && <TextLibrary />}
+      {tab === 'Stickers' && <StickerLibrary />}
+    </aside>
+  );
+}
+
+function TextLibrary() {
+  const addText = useEditor((s) => s.addText);
+  return (
+    <div className="media-body">
+      <p className="library-hint">Click to add at the playhead, or drag onto the timeline.</p>
+      <div className="text-preset-grid">
+        {TEXT_PRESETS.map((preset) => {
+          const t = { ...BASE_TEXT, ...preset.text };
+          return (
+            <button
+              key={preset.id}
+              className="text-preset"
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData(TEXT_DRAG_TYPE, JSON.stringify({ presetId: preset.id }))}
+              onClick={() => addText({ presetId: preset.id })}
+              title={`Add "${preset.label}" text`}
+            >
+              <span
+                style={{
+                  fontFamily: `"${t.fontFamily}", sans-serif`,
+                  fontWeight: t.bold ? 700 : 400,
+                  fontStyle: t.italic ? 'italic' : undefined,
+                  color: t.color,
+                  WebkitTextStroke: t.strokeWidth > 0 ? `1.5px ${t.strokeColor}` : undefined,
+                  textShadow: t.shadow ? '0 2px 4px rgba(0,0,0,0.8)' : undefined,
+                  background: t.backgroundOpacity > 0 ? t.backgroundColor : undefined,
+                  padding: '0 4px',
+                  borderRadius: 3,
+                }}
+              >
+                {preset.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StickerLibrary() {
+  const addText = useEditor((s) => s.addText);
+  return (
+    <div className="media-body">
+      <p className="library-hint">Click to add at the playhead, or drag onto the timeline.</p>
+      <div className="sticker-grid">
+        {STICKERS.map((sticker) => (
+          <button
+            key={sticker}
+            className="sticker"
+            draggable
+            onDragStart={(e) => e.dataTransfer.setData(TEXT_DRAG_TYPE, JSON.stringify({ sticker }))}
+            onClick={() => addText({ sticker })}
+          >
+            {sticker}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MediaLibrary() {
   const assets = useEditor((s) => s.assets);
   const addAssets = useEditor((s) => s.addAssets);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,62 +122,47 @@ export function MediaPanel() {
   }
 
   return (
-    <aside className="panel media-panel">
-      <nav className="tabs">
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            className={`tab ${tab === 'Media' ? 'active' : ''}`}
-            disabled={tab !== 'Media'}
-            title={tab === 'Media' ? undefined : 'Coming in a later step'}
-          >
-            {tab}
-          </button>
-        ))}
-      </nav>
-
-      <div
-        className={`media-body ${dragOver ? 'drag-over' : ''}`}
-        onDragOver={(e) => {
-          if (e.dataTransfer.types.includes('Files')) {
-            e.preventDefault();
-            setDragOver(true);
-          }
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
+    <div
+      className={`media-body ${dragOver ? 'drag-over' : ''}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
-          setDragOver(false);
-          handleFiles(e.dataTransfer.files);
+          setDragOver(true);
+        }
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        handleFiles(e.dataTransfer.files);
+      }}
+    >
+      <button className="import-btn" onClick={() => inputRef.current?.click()}>
+        <span className="import-plus">+</span>
+        <span>Import</span>
+        <small>or drop video, image & audio files here</small>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept="video/*,image/*,audio/*"
+        hidden
+        onChange={(e) => {
+          if (e.target.files) handleFiles(e.target.files);
+          e.target.value = '';
         }}
-      >
-        <button className="import-btn" onClick={() => inputRef.current?.click()}>
-          <span className="import-plus">+</span>
-          <span>Import</span>
-          <small>or drop video, image & audio files here</small>
-        </button>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept="video/*,image/*,audio/*"
-          hidden
-          onChange={(e) => {
-            if (e.target.files) handleFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
+      />
 
-        {importing > 0 && <div className="media-status">Importing {importing} file(s)…</div>}
-        {error && <div className="media-status error">{error}</div>}
+      {importing > 0 && <div className="media-status">Importing {importing} file(s)…</div>}
+      {error && <div className="media-status error">{error}</div>}
 
-        <div className="asset-grid">
-          {assets.map((asset) => (
-            <AssetTile key={asset.id} asset={asset} />
-          ))}
-        </div>
+      <div className="asset-grid">
+        {assets.map((asset) => (
+          <AssetTile key={asset.id} asset={asset} />
+        ))}
       </div>
-    </aside>
+    </div>
   );
 }
 

@@ -218,3 +218,19 @@ describe('updateTrack', () => {
     expect(t.tracks[0]).toMatchObject({ locked: true, muted: true, hidden: false });
   });
 });
+
+describe('track layering', () => {
+  const text: Track = { id: 'tx', kind: 'text', isMain: false, muted: false, hidden: false, locked: false };
+  it('keeps text on top, new video below text, audio at the bottom', () => {
+    let t = addTrack(createTimeline(), text);
+    t = addTrack(t, overlay);
+    t = addTrack(t, audio);
+    expect(t.tracks.map((tr) => tr.id)).toEqual(['tx', 'ov', 'main', 'au']);
+  });
+
+  it('refuses to move a text clip onto a video track', () => {
+    let t = addTrack(addTrack(createTimeline(), text), overlay);
+    t = insertClip(t, clip('words', 2, 'tx'), 0);
+    expect(moveClip(t, 'words', 0, 'ov')).toBe(t);
+  });
+});

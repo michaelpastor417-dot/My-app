@@ -3,7 +3,7 @@ import { MAX_ZOOM, MIN_ZOOM, isClipLocked, useEditor } from '../store/editorStor
 import { clipEnd, timelineDuration } from '../timeline/model';
 import { formatTime } from '../utils/time';
 import { trackDrag } from '../utils/drag';
-import { ASSET_DRAG_TYPE } from './MediaPanel';
+import { ASSET_DRAG_TYPE, TEXT_DRAG_TYPE } from './MediaPanel';
 import type { Clip, MediaAsset, Track } from '../types';
 
 const HEADER_WIDTH = 150;
@@ -189,7 +189,8 @@ export function Timeline() {
 
   // ---- Dropping media from the library ----
   function acceptsAsset(e: React.DragEvent) {
-    if (!e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) return false;
+    const types = e.dataTransfer.types;
+    if (!types.includes(ASSET_DRAG_TYPE) && !types.includes(TEXT_DRAG_TYPE)) return false;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     return true;
@@ -197,7 +198,10 @@ export function Timeline() {
   function onDropAsset(e: React.DragEvent, trackId: string) {
     if (!acceptsAsset(e)) return;
     e.stopPropagation();
-    addToTimeline(e.dataTransfer.getData(ASSET_DRAG_TYPE), { trackId, at: timeFromClientX(e.clientX) });
+    const opts = { trackId, at: timeFromClientX(e.clientX) };
+    const text = e.dataTransfer.getData(TEXT_DRAG_TYPE);
+    if (text) useEditor.getState().addText(JSON.parse(text), opts);
+    else addToTimeline(e.dataTransfer.getData(ASSET_DRAG_TYPE), opts);
   }
 
   const hasClips = timeline.clips.length > 0;
@@ -265,7 +269,7 @@ export function Timeline() {
             </div>
           </div>
 
-          <NewTrackZone label="Drop here to add an overlay track" onDrop={(e) => onDropAsset(e, 'new')} accepts={acceptsAsset} />
+          <NewTrackZone label="Drop here to add a new track" onDrop={(e) => onDropAsset(e, 'new')} accepts={acceptsAsset} />
 
           {timeline.tracks.map((track) => (
             <TrackRow
@@ -338,7 +342,7 @@ function TrackRow(props: {
   onDrop: (e: React.DragEvent) => void;
 }) {
   const { track, zoom, drag } = props;
-  const label = track.isMain ? 'Main' : track.kind === 'audio' ? 'Audio' : 'Overlay';
+  const label = track.isMain ? 'Main' : { video: 'Overlay', audio: 'Audio', text: 'Text' }[track.kind];
   const toggle = useEditor((s) => s.toggleTrackFlag);
   const trimHandle = (clip: Clip, edge: 'start' | 'end') => (
     <div
@@ -357,14 +361,16 @@ function TrackRow(props: {
         <TrackToggle on={track.locked} onClick={() => toggle(track.id, 'locked')} title={track.locked ? 'Unlock track' : 'Lock track'}>
           {track.locked ? '🔒' : '🔓'}
         </TrackToggle>
-        {track.kind === 'video' && (
+        {track.kind !== 'audio' && (
           <TrackToggle on={track.hidden} onClick={() => toggle(track.id, 'hidden')} title={track.hidden ? 'Show track' : 'Hide track'}>
             {track.hidden ? '◌' : '◉'}
           </TrackToggle>
         )}
-        <TrackToggle on={track.muted} onClick={() => toggle(track.id, 'muted')} title={track.muted ? 'Unmute track' : 'Mute track'}>
-          {track.muted ? '🔇' : '🔊'}
-        </TrackToggle>
+        {track.kind !== 'text' && (
+          <TrackToggle on={track.muted} onClick={() => toggle(track.id, 'muted')} title={track.muted ? 'Unmute track' : 'Mute track'}>
+            {track.muted ? '🔇' : '🔊'}
+          </TrackToggle>
+        )}
       </div>
       <div
         className={`track-lane ${props.isDropTarget ? 'drop-target' : ''}`}
@@ -380,7 +386,7 @@ function TrackRow(props: {
           return (
             <div
               key={clip.id}
-              className={`clip ${asset?.kind ?? ''} ${selected ? 'selected' : ''} ${
+              className={`clip ${clip.text ? 'text' : (asset?.kind ?? '')} ${selected ? 'selected' : ''} ${
                 dragging ? 'dragging' : ''
               }`}
               style={{
@@ -395,7 +401,7 @@ function TrackRow(props: {
               onPointerCancel={props.onClipPointerUp}
             >
               <span className="clip-label">
-                {asset?.name} · {formatTime(clip.duration)}
+                {clip.text ? clip.text.content.split('\n')[0] || 'Text' : asset?.name} · {formatTime(clip.duration)}
               </span>
               {selected && !track.locked && !dragging && (
                 <>

@@ -1,12 +1,16 @@
 import { create } from 'zustand';
-import type { CanvasBackground, Clip, MediaAsset, Timeline, Track, TrackKind } from '../types';
+import type { CanvasBackground, Clip, MediaAsset, TextData, Timeline, Track, TrackKind } from '../types';
+import { BASE_TEXT, DEFAULT_TEXT_DURATION } from '../engine/text';
+import { STICKER_TEXT, TEXT_PRESETS } from '../timeline/textPresets';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import {
   DEFAULT_IMAGE_DURATION,
   addTrack,
   clipsAt,
+  clipsOnTrack,
   createTimeline,
   duplicateClip,
+  findFreeStart,
   getTrack,
   insertClip,
   moveClip,
@@ -17,6 +21,7 @@ import {
   splitClip,
   timelineDuration,
   trimClip,
+  updateClipText,
   updateClipVisual,
   updateTrack,
 } from '../timeline/model';
@@ -61,6 +66,9 @@ interface EditorState {
    * main track and audio on a new audio track. `trackId: 'new'` always makes a new track.
    */
   addToTimeline: (assetId: string, opts?: { trackId?: string; at?: number }) => void;
+  /** Add a text clip from a preset, or an emoji sticker, at the playhead (or `opts.at`). */
+  addText: (source: { presetId: string } | { sticker: string }, opts?: { trackId?: string; at?: number }) => void;
+  updateText: (clipId: string, patch: Partial<TextData>, coalesceKey?: string) => void;
   moveClip: (clipId: string, start: number, trackId: string) => void;
   deleteSelected: () => void;
   splitAtPlayhead: () => void;
@@ -102,14 +110,28 @@ export function isClipLocked(timeline: Timeline, clip: Clip): boolean {
 
 /**
  * Resolve which track a new clip of `kind` should land on. Falls back to the
- * main track (visual media) or a fresh track when the requested one is
- * missing, locked, or of the wrong kind.
+ * main track (visual media), an existing text track with room at `at` (text),
+ * or a fresh track when the requested one is missing, locked, or of the wrong kind.
  */
-function resolveTrack(timeline: Timeline, kind: TrackKind, requested?: string): [Timeline, string] {
+function resolveTrack(
+  timeline: Timeline,
+  kind: TrackKind,
+  requested: string | undefined,
+  at: number,
+  duration: number,
+): [Timeline, string] {
   const track = requested && requested !== 'new' ? getTrack(timeline, requested) : undefined;
   if (track && track.kind === kind && !track.locked) return [timeline, track.id];
-  const main = getTrack(timeline, 'main')!;
-  if (kind === 'video' && requested !== 'new' && !main.locked) return [timeline, main.id];
+  if (requested !== 'new') {
+    const main = getTrack(timeline, 'main')!;
+    if (kind === 'video' && !main.locked) return [timeline, main.id];
+    if (kind === 'text') {
+      const free = timeline.tracks.find(
+        (t) => t.kind === 'text' && !t.locked && findFreeStart(clipsOnTrack(timeline, t.id), at, duration) === at,
+      );
+      if (free) return [timeline, free.id];
+    }
+  }
   const created = newTrack(kind);
   return [addTrack(timeline, created), created.id];
 }
@@ -147,13 +169,27 @@ export const useEditor = create<EditorState>((set, get) => {
     return get().assets.find((a) => a.id === clip.assetId);
   }
 
+  function trackKindOf(clip: Pick<Clip, 'text' | 'assetId'>): TrackKind {
+    if (clip.text) return 'text';
+    return assetFor(clip as Clip)?.kind === 'audio' ? 'audio' : 'video';
+  }
+
+  /** How far a clip can be stretched: its media's length, or unbounded for images and text. */
+  function sourceDurationOf(clip: Clip): number | null {
+    if (clip.text) return Infinity;
+    const asset = assetFor(clip);
+    if (!asset) return null;
+    return asset.kind === 'image' ? Infinity : asset.duration;
+  }
+
   /** Place a clip (new or pasted) on the timeline, choosing its track and position. */
-  function place(template: Omit<Clip, 'trackId' | 'start'>, kind: TrackKind, opts: { trackId?: string; at?: number }) {
-    const [timeline, trackId] = resolveTrack(get().timeline, kind, opts.trackId);
+  function place(template: Omit<Clip, 'trackId' | 'start'>, opts: { trackId?: string; at?: number }) {
+    const kind = trackKindOf(template);
+    const at = opts.at ?? get().currentTime;
+    const [timeline, trackId] = resolveTrack(get().timeline, kind, opts.trackId, at, template.duration);
     const clip: Clip = { ...template, trackId, start: 0 };
-    // Overlays and audio default to the playhead position, like CapCut.
-    const at = opts.at ?? (trackId === 'main' ? undefined : get().currentTime);
-    commit(insertClip(timeline, clip, at), { selectedClipId: clip.id });
+    // The main track appends unless dropped at a spot; everything else lands at the playhead, like CapCut.
+    commit(insertClip(timeline, clip, trackId === 'main' ? opts.at : at), { selectedClipId: clip.id });
   }
 
   return {
@@ -175,11 +211,24 @@ export const useEditor = create<EditorState>((set, get) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset) return;
       const duration = asset.kind === 'image' ? DEFAULT_IMAGE_DURATION : asset.duration;
-      place(
-        { id: uid(), assetId, inPoint: 0, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP },
-        asset.kind === 'audio' ? 'audio' : 'video',
-        opts,
-      );
+      place({ id: uid(), assetId, inPoint: 0, duration, transform: DEFAULT_TRANSFORM, crop: NO_CROP }, opts);
+    },
+
+    addText: (source, opts = {}) => {
+      const preset = 'presetId' in source ? TEXT_PRESETS.find((p) => p.id === source.presetId) : undefined;
+      const text: TextData =
+        'sticker' in source
+          ? { ...BASE_TEXT, ...STICKER_TEXT, content: source.sticker }
+          : { ...BASE_TEXT, ...preset?.text };
+      const transform = { ...DEFAULT_TRANSFORM, ...preset?.transform };
+      place({ id: uid(), text, inPoint: 0, duration: DEFAULT_TEXT_DURATION, transform, crop: NO_CROP }, opts);
+    },
+
+    updateText: (clipId, patch, coalesceKey) => {
+      const { timeline } = get();
+      const clip = timeline.clips.find((c) => c.id === clipId);
+      if (!clip?.text || isClipLocked(timeline, clip)) return;
+      commit(updateClipText(timeline, clipId, patch), {}, coalesceKey && `${clipId}:text-${coalesceKey}`);
     },
 
     moveClip: (clipId, start, trackId) => {
@@ -222,13 +271,9 @@ export const useEditor = create<EditorState>((set, get) => {
 
     paste: () => {
       const { clipboard } = get();
-      const asset = clipboard && assetFor(clipboard);
-      if (!clipboard || !asset) return;
+      if (!clipboard || (!clipboard.text && !assetFor(clipboard))) return;
       const { id: _id, trackId, start: _start, ...rest } = clipboard;
-      place({ ...rest, id: uid() }, asset.kind === 'audio' ? 'audio' : 'video', {
-        trackId,
-        at: get().currentTime,
-      });
+      place({ ...rest, id: uid() }, { trackId, at: get().currentTime });
     },
 
     toggleTrackFlag: (trackId, flag) => {
@@ -262,9 +307,8 @@ export const useEditor = create<EditorState>((set, get) => {
     trimGesture: (clipId, edge, time) => {
       const base = get().gestureBase;
       const clip = base?.clips.find((c) => c.id === clipId);
-      const asset = clip && assetFor(clip);
-      if (!base || !clip || !asset || isClipLocked(base, clip)) return;
-      const sourceDuration = asset.kind === 'image' ? Infinity : asset.duration;
+      const sourceDuration = clip && sourceDurationOf(clip);
+      if (!base || !clip || sourceDuration == null || isClipLocked(base, clip)) return;
       set({ timeline: trimClip(base, clipId, edge, time, sourceDuration) });
     },
 

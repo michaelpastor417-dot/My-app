@@ -18,6 +18,7 @@ npm run build      # typecheck + production build
 | Data model | `src/types.ts`, `src/timeline/model.ts` | Media assets, tracks and clips. Timeline operations are pure functions (no mutation), which makes undo/redo and export straightforward. |
 | State | `src/store/editorStore.ts` | Zustand store: library, timeline, playhead, selection, zoom, canvas ratio. |
 | Playback engine | `src/engine/PlaybackEngine.ts` | Master clock plus one media element per clip, kept in sync with the clock; composites visible clips onto the preview canvas every frame. |
+| Text | `src/engine/text.ts`, `src/timeline/textPresets.ts` | Text layout, drawing and in/out animations (pure, tested); preset styles and stickers. |
 | Geometry | `src/engine/geometry.ts` | Where each clip lands on the canvas (transform + crop), hit testing and rotation maths, shared by the renderer and the player's handles. |
 | UI | `src/components/*` | Media panel, player, properties panel, timeline. |
 
@@ -26,7 +27,7 @@ Keyboard shortcuts: Space play/pause · Ctrl+B split · Ctrl+Z / Ctrl+Shift+Z (o
 Timeline rules (matching CapCut):
 - **Main track is magnetic:** clips sit back to back with no gaps. Dropping between clips inserts, and deleting closes the gap.
 - **Overlay and audio tracks are free:** clips go anywhere but never overlap on the same track.
-- Upper tracks render on top of lower ones.
+- Upper tracks render on top of lower ones. Text tracks always sit above video tracks, audio below.
 - Clips can't be trimmed past the ends of their source media; images stretch freely.
 - Locked tracks can't be edited; hidden tracks don't render; muted tracks are silent.
 
@@ -35,7 +36,7 @@ Timeline rules (matching CapCut):
 - [x] **Step 1: Foundation.** Import video/image/audio, media library, main + overlay + audio tracks, drag & drop, clip move/reorder with snapping, ruler scrubbing, synced preview playback, canvas ratios, zoom, keyboard shortcuts (Space, Del, ←/→).
 - [x] **Step 2: Core editing.** Split at playhead, trim handles (with snapping and ripple on the main track), undo/redo, copy/paste/duplicate, track mute/hide/lock.
 - [x] **Step 3: Transform & canvas.** Move/scale/rotate clips directly on the player (centre snapping, 90° rotation snapping), opacity, crop, canvas background (colour or blurred video), properties panel with numeric controls.
-- [ ] **Step 4: Text & stickers.** Text clips with fonts, styles, animations; stickers.
+- [x] **Step 4: Text & stickers.** Text presets (title, subtitle, outline, boxed, typewriter, pop…), font/size/colour/bold/italic/alignment, outline, shadow, background box, in/out animations (fade, slide, pop, typewriter), emoji stickers; edited in the Properties panel and moved/scaled/rotated on the player.
 - [ ] **Step 5: Audio.** Waveforms, volume, fade in/out, extract audio, voiceover recording.
 - [ ] **Step 6: Speed & keyframes.** Constant/curve speed, reverse, freeze frame, keyframe animation.
 - [ ] **Step 7: Effects, filters, transitions.** WebGL render pipeline, color adjustments, transitions between main-track clips.

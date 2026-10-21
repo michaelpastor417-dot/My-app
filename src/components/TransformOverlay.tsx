@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
 import { clipsAt } from '../timeline/model';
-import { angleAround, clipRect, hitTest, normalizeAngle, snapRotation } from '../engine/geometry';
+import { angleAround, hitTest, normalizeAngle, rectForClip, snapRotation } from '../engine/geometry';
 import { trackDrag } from '../utils/drag';
-import type { Clip, MediaAsset, Timeline } from '../types';
+import type { Clip, Timeline } from '../types';
+
+/** id of the Properties panel's text box, focused when text is double-clicked in the player. */
+export const TEXT_INPUT_ID = 'text-content-input';
 
 /** Screen distance (px) within which a dragged clip's centre snaps to the canvas centre lines. */
 const CENTER_SNAP_PX = 8;
@@ -14,7 +17,7 @@ const CORNERS = ['nw', 'ne', 'se', 'sw'] as const;
 function visibleClipsTopFirst(timeline: Timeline, time: number): Clip[] {
   const active = clipsAt(timeline, time);
   return timeline.tracks
-    .filter((t) => t.kind === 'video' && !t.hidden)
+    .filter((t) => t.kind !== 'audio' && !t.hidden)
     .flatMap((t) => active.filter((c) => c.trackId === t.id));
 }
 
@@ -35,11 +38,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
   const [guides, setGuides] = useState<{ v: boolean; h: boolean }>({ v: false, h: false });
   const [rotating, setRotating] = useState(false);
 
-  const assetOf = (clip: Clip): MediaAsset | undefined => assets.find((a) => a.id === clip.assetId);
-  const rectOf = (clip: Clip) => {
-    const asset = assetOf(clip);
-    return asset ? clipRect(asset, clip.transform, clip.crop, canvasW, canvasH) : null;
-  };
+  const rectOf = (clip: Clip) => rectForClip(clip, assets, canvasW, canvasH);
 
   const visible = visibleClipsTopFirst(timeline, currentTime);
   const selected = visible.find((c) => c.id === selectedClipId);
@@ -135,7 +134,16 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
   }
 
   return (
-    <div className="transform-overlay" onPointerDown={onPointerDown}>
+    <div
+      className="transform-overlay"
+      onPointerDown={onPointerDown}
+      onDoubleClick={() => {
+        if (!selected?.text) return;
+        const input = document.getElementById(TEXT_INPUT_ID) as HTMLTextAreaElement | null;
+        input?.focus();
+        input?.select();
+      }}
+    >
       {guides.v && <div className="snap-guide vertical" />}
       {guides.h && <div className="snap-guide horizontal" />}
       {selected && selectedRect && (

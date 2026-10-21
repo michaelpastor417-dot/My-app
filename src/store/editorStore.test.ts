@@ -129,4 +129,45 @@ describe('editor store', () => {
     s().undo();
     expect(s().timeline.background.type).toBe('color');
   });
+
+  it('adds preset text at the playhead on a text track above video', () => {
+    s().addToTimeline('v');
+    s().seek(1);
+    s().addText({ presetId: 'subtitle' });
+    const clip = s().timeline.clips.find((c) => c.text)!;
+    expect(clip).toMatchObject({ start: 1, duration: 3, transform: { y: 0.38 } });
+    expect(clip.text!.content).toBe('Subtitle text');
+    expect(s().timeline.tracks[0].kind).toBe('text');
+  });
+
+  it('reuses a text track when there is room, otherwise stacks a new one', () => {
+    s().addText({ presetId: 'default' });
+    s().addText({ sticker: '🔥' }); // overlaps the first -> new track
+    useEditor.setState({ currentTime: 5 }); // seek() clamps to the timeline end, so set directly
+    s().addText({ presetId: 'title' }); // free spot at 5s on the first text track
+    const textTracks = s().timeline.tracks.filter((t) => t.kind === 'text');
+    expect(textTracks).toHaveLength(2);
+  });
+
+  it('edits text content and undoes typing as one step', () => {
+    s().addText({ presetId: 'default' });
+    const id = s().selectedClipId!;
+    s().updateText(id, { content: 'H' }, 'content');
+    s().updateText(id, { content: 'Hi' }, 'content');
+    expect(s().timeline.clips[0].text!.content).toBe('Hi');
+    s().undo();
+    expect(s().timeline.clips[0].text!.content).toBe('Default text');
+  });
+
+  it('text clips can be trimmed longer freely and pasted', () => {
+    s().addText({ presetId: 'default' });
+    const id = s().selectedClipId!;
+    s().beginGesture();
+    s().trimGesture(id, 'end', 20);
+    s().endGesture();
+    expect(s().timeline.clips[0].duration).toBe(20);
+    s().copySelected();
+    s().paste();
+    expect(s().timeline.clips.filter((c) => c.text)).toHaveLength(2);
+  });
 });

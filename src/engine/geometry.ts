@@ -1,4 +1,5 @@
-import type { Crop, MediaAsset, Transform } from '../types';
+import type { Clip, Crop, MediaAsset, Transform } from '../types';
+import { type MeasureText, layoutText, measureWithCanvas } from './text';
 
 export const DEFAULT_TRANSFORM: Transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
 export const NO_CROP: Crop = { left: 0, top: 0, right: 0, bottom: 0 };
@@ -90,4 +91,31 @@ export function clampCrop(crop: Crop): Crop {
     right: Math.min(Math.max(crop.right, 0), max - left),
     bottom: Math.min(Math.max(crop.bottom, 0), max - top),
   };
+}
+
+/**
+ * On-canvas box for any visual clip: media is fitted to the canvas, text is
+ * sized by its layout. Returns null when the clip has nothing to show.
+ */
+export function rectForClip(
+  clip: Clip,
+  assets: MediaAsset[],
+  canvasW: number,
+  canvasH: number,
+  measure: MeasureText = measureWithCanvas,
+): ClipRect | null {
+  if (clip.text) {
+    const layout = layoutText(clip.text, canvasW, canvasH, measure);
+    const { x, y, scale, rotation } = clip.transform;
+    return {
+      cx: canvasW / 2 + x * canvasW,
+      cy: canvasH / 2 + y * canvasH,
+      w: layout.width * scale,
+      h: layout.height * scale,
+      rotation,
+    };
+  }
+  const asset = assets.find((a) => a.id === clip.assetId);
+  if (!asset || asset.kind === 'audio') return null;
+  return clipRect(asset, clip.transform, clip.crop, canvasW, canvasH);
 }

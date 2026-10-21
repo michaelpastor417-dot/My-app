@@ -1,7 +1,180 @@
 import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import { formatTime } from '../utils/time';
-import type { CanvasBackground, Clip, Crop } from '../types';
+import type { CanvasBackground, Clip, Crop, TextAnimationIn, TextAnimationOut, TextData } from '../types';
+import { FONT_FAMILIES } from '../engine/text';
+import { TEXT_INPUT_ID } from './TransformOverlay';
+
+type TextProps = { clip: Clip; text: TextData };
+
+const ANIMATIONS_IN: Record<TextAnimationIn, string> = {
+  none: 'None',
+  fade: 'Fade in',
+  'slide-up': 'Slide up',
+  pop: 'Pop',
+  typewriter: 'Typewriter',
+};
+const ANIMATIONS_OUT: Record<TextAnimationOut, string> = {
+  none: 'None',
+  fade: 'Fade out',
+  'slide-down': 'Slide down',
+  pop: 'Pop',
+};
+
+function useTextUpdater(clip: Clip) {
+  const updateText = useEditor((s) => s.updateText);
+  return (key: string, patch: Partial<TextData>) => updateText(clip.id, patch, key);
+}
+
+function TextSection({ clip, text }: TextProps) {
+  const set = useTextUpdater(clip);
+  return (
+    <section className="inspector-section">
+      <textarea
+        id={TEXT_INPUT_ID}
+        className="text-input"
+        rows={3}
+        value={text.content}
+        placeholder="Enter text"
+        onChange={(e) => set('content', { content: e.target.value })}
+      />
+      <label className="field select-field">
+        <span>Font</span>
+        <select value={text.fontFamily} onChange={(e) => set('font', { fontFamily: e.target.value })}>
+          {FONT_FAMILIES.map((f) => (
+            <option key={f} value={f} style={{ fontFamily: f }}>
+              {f}
+            </option>
+          ))}
+        </select>
+      </label>
+      <SliderField
+        label="Size"
+        unit=""
+        min={8}
+        max={400}
+        value={Math.round(text.fontSize)}
+        onChange={(v) => set('size', { fontSize: v })}
+      />
+      <div className="text-format-row">
+        <input
+          type="color"
+          title="Text colour"
+          value={text.color}
+          onChange={(e) => set('color', { color: e.target.value })}
+        />
+        <div className="segmented">
+          <button className={text.bold ? 'active' : ''} onClick={() => set('bold', { bold: !text.bold })} title="Bold">
+            <b>B</b>
+          </button>
+          <button
+            className={text.italic ? 'active' : ''}
+            onClick={() => set('italic', { italic: !text.italic })}
+            title="Italic"
+          >
+            <i>I</i>
+          </button>
+        </div>
+        <div className="segmented">
+          {(['left', 'center', 'right'] as const).map((align) => (
+            <button
+              key={align}
+              className={text.align === align ? 'active' : ''}
+              onClick={() => set('align', { align })}
+              title={`Align ${align}`}
+            >
+              {{ left: '⇤', center: '≡', right: '⇥' }[align]}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TextStyleSection({ clip, text }: TextProps) {
+  const set = useTextUpdater(clip);
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Style</h4>
+      </header>
+      <div className="color-slider-row">
+        <input
+          type="color"
+          title="Outline colour"
+          value={text.strokeColor}
+          onChange={(e) => set('stroke-color', { strokeColor: e.target.value })}
+        />
+        <SliderField
+          label="Outline"
+          unit="%"
+          min={0}
+          max={30}
+          value={Math.round(text.strokeWidth * 100)}
+          onChange={(v) => set('stroke', { strokeWidth: v / 100 })}
+        />
+      </div>
+      <div className="color-slider-row">
+        <input
+          type="color"
+          title="Background colour"
+          value={text.backgroundColor}
+          onChange={(e) => set('bg-color', { backgroundColor: e.target.value })}
+        />
+        <SliderField
+          label="Box"
+          unit="%"
+          min={0}
+          max={100}
+          value={Math.round(text.backgroundOpacity * 100)}
+          onChange={(v) => set('bg', { backgroundOpacity: v / 100 })}
+        />
+      </div>
+      <label className="checkbox-field">
+        <input type="checkbox" checked={text.shadow} onChange={(e) => set('shadow', { shadow: e.target.checked })} />
+        Shadow
+      </label>
+    </section>
+  );
+}
+
+function AnimationSection({ clip, text }: TextProps) {
+  const set = useTextUpdater(clip);
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Animation</h4>
+      </header>
+      <label className="field select-field">
+        <span>In</span>
+        <select
+          value={text.animationIn}
+          onChange={(e) => set('anim-in', { animationIn: e.target.value as TextAnimationIn })}
+        >
+          {Object.entries(ANIMATIONS_IN).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field select-field">
+        <span>Out</span>
+        <select
+          value={text.animationOut}
+          onChange={(e) => set('anim-out', { animationOut: e.target.value as TextAnimationOut })}
+        >
+          {Object.entries(ANIMATIONS_OUT).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}
 
 export function Inspector() {
   const clip = useEditor((s) => s.timeline.clips.find((c) => c.id === s.selectedClipId));
@@ -11,11 +184,27 @@ export function Inspector() {
 
   return (
     <aside className="panel inspector">
-      <div className="panel-title">{clip ? 'Clip' : 'Canvas'}</div>
+      <div className="panel-title">{clip ? (clip.text ? 'Text' : 'Clip') : 'Canvas'}</div>
       <div className="inspector-body">
-        {!clip || !asset ? (
+        {!clip ? (
           <CanvasSettings />
-        ) : (
+        ) : clip.text ? (
+          <>
+            <dl className="props">
+              <dt>Start</dt>
+              <dd>{formatTime(clip.start, true)}</dd>
+              <dt>Duration</dt>
+              <dd>{formatTime(clip.duration, true)}</dd>
+            </dl>
+            {locked && <p className="empty-hint">This clip's track is locked.</p>}
+            <fieldset disabled={locked}>
+              <TextSection clip={clip} text={clip.text} />
+              <TextStyleSection clip={clip} text={clip.text} />
+              <AnimationSection clip={clip} text={clip.text} />
+              <TransformSection clip={clip} />
+            </fieldset>
+          </>
+        ) : !asset ? null : (
           <>
             <dl className="props">
               <dt>Name</dt>
