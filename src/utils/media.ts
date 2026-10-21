@@ -87,7 +87,12 @@ export async function loadPeaks(url: string): Promise<number[]> {
 }
 
 async function decode(url: string): Promise<AudioBuffer> {
+  return decodeAudio(url, 44100);
+}
+
+/** Decode a file's sound at `sampleRate` (resampling if needed). Throws if the file has no decodable audio. */
+export async function decodeAudio(url: string, sampleRate: number): Promise<AudioBuffer> {
   const data = await (await fetch(url)).arrayBuffer();
   // An offline context can decode without a user gesture and never plays anything.
-  return new OfflineAudioContext(1, 1, 44100).decodeAudioData(data);
+  return new OfflineAudioContext(1, 1, sampleRate).decodeAudioData(data);
 }
