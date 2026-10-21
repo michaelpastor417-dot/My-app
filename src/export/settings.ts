@@ -28,3 +28,11 @@ export function estimateBytes(width: number, height: number, fps: number, durati
   const audioBits = 128_000 * duration;
   return (videoBits + audioBits) / 8;
 }
+
+export const CODEC_NAMES: Record<string, string> = {
+  avc: 'H.264',
+  vp9: 'VP9',
+  av1: 'AV1',
+  aac: 'AAC',
+  opus: 'Opus',
+};

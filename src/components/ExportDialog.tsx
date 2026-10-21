@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditor } from '../store/editorStore';
 import { timelineDuration } from '../timeline/model';
-import { CODEC_NAMES, type ExportProgress, type ExportResult, exportVideo } from '../export/exporter';
+import type { ExportProgress, ExportResult } from '../export/exporter';
 import {
+  CODEC_NAMES,
   FRAME_RATES,
   type QualityLevel,
   RESOLUTIONS,
@@ -66,6 +67,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     const startedAt = performance.now();
     setStage({ kind: 'running', progress: { phase: 'preparing', progress: 0 }, startedAt });
     try {
+      // The encoder library is only downloaded when someone actually exports.
+      const { exportVideo } = await import('../export/exporter');
       const result = await exportVideo(
         timeline,
         assets,

@@ -49,14 +49,6 @@ const QUALITY: Record<QualityLevel, Quality> = { low: QUALITY_LOW, recommended: 
 const VIDEO_CODECS = ['avc', 'vp9', 'av1'] as const;
 const AUDIO_CODECS = ['aac', 'opus'] as const;
 
-export const CODEC_NAMES: Record<string, string> = {
-  avc: 'H.264',
-  vp9: 'VP9',
-  av1: 'AV1',
-  aac: 'AAC',
-  opus: 'Opus',
-};
-
 function once(target: EventTarget, type: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, timeoutMs);
