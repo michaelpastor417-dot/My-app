@@ -5,6 +5,7 @@ import { formatTime } from '../utils/time';
 import type { MediaAsset, MediaKind } from '../types';
 import { BASE_TEXT } from '../engine/text';
 import { STICKERS, TEXT_PRESETS } from '../timeline/textPresets';
+import { EffectsLibrary, FiltersLibrary, TransitionsLibrary } from './LookLibraries';
 
 export const ASSET_DRAG_TYPE = 'application/x-clipforge-asset';
 /** Drag payload for text presets and stickers: JSON of the `addText` source. */
@@ -12,7 +13,6 @@ export const TEXT_DRAG_TYPE = 'application/x-clipforge-text';
 
 const TABS = ['Media', 'Audio', 'Text', 'Stickers', 'Effects', 'Transitions', 'Filters'] as const;
 type Tab = (typeof TABS)[number];
-const READY_TABS: Tab[] = ['Media', 'Audio', 'Text', 'Stickers'];
 
 export function MediaPanel() {
   const [tab, setTab] = useState<Tab>('Media');
@@ -20,13 +20,7 @@ export function MediaPanel() {
     <aside className="panel media-panel">
       <nav className="tabs">
         {TABS.map((t) => (
-          <button
-            key={t}
-            className={`tab ${t === tab ? 'active' : ''}`}
-            disabled={!READY_TABS.includes(t)}
-            title={READY_TABS.includes(t) ? undefined : 'Coming in a later step'}
-            onClick={() => setTab(t)}
-          >
+          <button key={t} className={`tab ${t === tab ? 'active' : ''}`} onClick={() => setTab(t)}>
             {t}
           </button>
         ))}
@@ -40,6 +34,9 @@ export function MediaPanel() {
       )}
       {tab === 'Text' && <TextLibrary />}
       {tab === 'Stickers' && <StickerLibrary />}
+      {tab === 'Effects' && <EffectsLibrary />}
+      {tab === 'Transitions' && <TransitionsLibrary />}
+      {tab === 'Filters' && <FiltersLibrary />}
     </aside>
   );
 }

@@ -243,4 +243,40 @@ describe('editor store', () => {
     expect(mainStarts()).toEqual([[0, 1], [1, 3], [4, 3]]);
     expect(s().timeline.clips.find((c) => c.id === s().selectedClipId)!.freezeAt).toBe(1);
   });
+
+  it('applies a filter from the library to the main clip under the playhead and tunes it', () => {
+    s().addToTimeline('v');
+    s().select(null);
+    s().applyFilter('warm');
+    const id = s().timeline.clips[0].id;
+    expect(s().timeline.clips[0].filter).toEqual({ id: 'warm', intensity: 1 });
+    s().setFilter(id, { id: 'warm', intensity: 0.4 }, 'intensity');
+    s().setFilter(id, { id: 'warm', intensity: 0.3 }, 'intensity');
+    s().setAdjustment(id, 'contrast', 20);
+    s().setAdjustment(id, 'contrast', 30);
+    expect(s().timeline.clips[0]).toMatchObject({ filter: { intensity: 0.3 }, adjust: { contrast: 30 } });
+    s().undo(); // both contrast edits
+    s().undo(); // both intensity edits
+    expect(s().timeline.clips[0]).toMatchObject({ filter: { intensity: 1 } });
+    expect(s().timeline.clips[0].adjust).toBeUndefined();
+  });
+
+  it('adds a transition at the cut nearest the playhead and deletes it with Delete', () => {
+    s().addToTimeline('v');
+    s().addToTimeline('p');
+    useEditor.setState({ currentTime: 3.6 });
+    s().applyTransition('slide-left');
+    const first = clipsOnTrack(s().timeline, 'main')[0];
+    expect(first.transition).toEqual({ type: 'slide-left', duration: 0.5 });
+    expect(mainStarts()).toEqual([[0, 4], [3.5, 3]]);
+    expect(s().selectedTransitionId).toBe(first.id);
+    s().deleteSelected();
+    expect(mainStarts()).toEqual([[0, 4], [4, 3]]);
+  });
+
+  it('does not apply effects to text or audio', () => {
+    s().addText({ presetId: 'default' });
+    s().applyEffect('glitch');
+    expect(s().timeline.clips[0].effect).toBeUndefined();
+  });
 });

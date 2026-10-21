@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_ZOOM, MIN_ZOOM, isClipLocked, useEditor } from '../store/editorStore';
 import { clipEnd, clipsAt, timelineDuration } from '../timeline/model';
 import { keyframeTimes } from '../timeline/animation';
+import { TRANSITIONS, transitionOverlap } from '../timeline/transitions';
 import { formatTime } from '../utils/time';
 import { trackDrag } from '../utils/drag';
 import { Waveform } from './Waveform';
@@ -458,8 +459,41 @@ function TrackRow(props: {
             </div>
           );
         })}
+        {track.isMain && <TransitionMarkers clips={props.clips} zoom={zoom} />}
       </div>
     </div>
+  );
+}
+
+/** A ⧓ button on every main-track cut to pick it for a transition, plus shading over transition overlaps. */
+function TransitionMarkers({ clips, zoom }: { clips: Clip[]; zoom: number }) {
+  const selectedTransitionId = useEditor((s) => s.selectedTransitionId);
+  const selectTransition = useEditor((s) => s.selectTransition);
+  const ordered = [...clips].sort((a, b) => a.start - b.start);
+  return (
+    <>
+      {ordered.slice(0, -1).map((a, i) => {
+        const b = ordered[i + 1];
+        const overlap = transitionOverlap(a, b);
+        const icon = TRANSITIONS.find((t) => t.type === a.transition?.type)?.icon ?? '⧓';
+        return (
+          <div key={a.id}>
+            {overlap > 0 && (
+              <div className="transition-overlap" style={{ left: b.start * zoom, width: overlap * zoom }} />
+            )}
+            <button
+              className={`transition-marker ${a.transition ? 'has' : ''} ${selectedTransitionId === a.id ? 'selected' : ''}`}
+              style={{ left: (b.start + overlap / 2) * zoom }}
+              title={a.transition ? 'Edit transition' : 'Add a transition here'}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => selectTransition(a.id)}
+            >
+              {icon}
+            </button>
+          </div>
+        );
+      })}
+    </>
   );
 }
 

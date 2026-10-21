@@ -21,13 +21,15 @@ npm run build      # typecheck + production build
 | Clip time & keyframes | `src/timeline/animation.ts` | Maps timeline time to media time (speed, reverse, freeze) and interpolates keyframes; keyframes live in media time so trims, splits and speed changes keep them on the same frames. |
 | Audio | `src/engine/audio.ts` | Volume/fade gain curve, waveform peak extraction and resampling (pure, tested). Playback routes every clip through a Web Audio gain node. |
 | Text | `src/engine/text.ts`, `src/timeline/textPresets.ts` | Text layout, drawing and in/out animations (pure, tested); preset styles and stickers. |
+| GPU | `src/engine/gpu.ts` | WebGL2 shaders: per-clip colour grading + effects, and transitions between two canvas-sized layers. The 2D compositor places the results. |
+| Looks & transitions | `src/timeline/look.ts`, `src/timeline/transitions.ts` | Filter presets, adjustments and effects resolved into shader inputs; transition overlap, timing and audio crossfade (pure, tested). |
 | Geometry | `src/engine/geometry.ts` | Where each clip lands on the canvas (transform + crop), hit testing and rotation maths, shared by the renderer and the player's handles. |
 | UI | `src/components/*` | Media panel, player, properties panel, timeline. |
 
 Keyboard shortcuts: Space play/pause · Ctrl+B split · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo/redo · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · Del delete · ←/→ step a frame (Shift: 1s).
 
 Timeline rules (matching CapCut):
-- **Main track is magnetic:** clips sit back to back with no gaps. Dropping between clips inserts, and deleting closes the gap.
+- **Main track is magnetic:** clips sit back to back with no gaps. Dropping between clips inserts, and deleting closes the gap. A transition makes the next clip overlap the previous one by its length (at most half of either clip).
 - **Overlay and audio tracks are free:** clips go anywhere but never overlap on the same track.
 - Upper tracks render on top of lower ones. Text tracks always sit above video tracks, audio below.
 - Clips can't be trimmed past the ends of their source media; images stretch freely.
@@ -41,7 +43,7 @@ Timeline rules (matching CapCut):
 - [x] **Step 4: Text & stickers.** Text presets (title, subtitle, outline, boxed, typewriter, pop…), font/size/colour/bold/italic/alignment, outline, shadow, background box, in/out animations (fade, slide, pop, typewriter), emoji stickers; edited in the Properties panel and moved/scaled/rotated on the player.
 - [x] **Step 5: Audio.** Waveforms on audio and video clips, per-clip volume (0–200%), fade in/out, detach audio from video, voiceover recording from the microphone, Audio tab.
 - [x] **Step 6: Speed & keyframes.** Speed 0.1×–10× (presets or exact), reverse, freeze frame, keyframe animation of position/scale/rotation/opacity/volume with CapCut-style auto-keyframing, keyframe navigation and timeline diamonds. (Speed curves come later.)
-- [ ] **Step 7: Effects, filters, transitions.** WebGL render pipeline, color adjustments, transitions between main-track clips.
+- [x] **Step 7: Effects, filters, transitions.** WebGL2 pipeline: 10 colour adjustments, 10 filters with strength (previews rendered by the real shader), 8 effects (blur, vignette, glitch, RGB split, pixelate, grain, mirror, shake), 9 transitions between main-track clips with overlap and audio crossfade; tabbed Properties panel.
 - [ ] **Step 8: Export.** Frame-accurate offline render with WebCodecs → MP4, resolution/fps/quality options.
 - [ ] **Step 9: Projects.** Save/load projects locally (IndexedDB), autosave, drafts list.
 - [ ] **Step 10: AI features.** Auto captions, background removal, smart cut.

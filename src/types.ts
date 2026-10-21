@@ -106,6 +106,46 @@ export interface Keyframe {
   volume: number;
 }
 
+/**
+ * Colour adjustments. Each runs from -100 to 100 with 0 meaning "unchanged",
+ * except sharpen and vignette which run from 0 to 100.
+ */
+export interface Adjustments {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  exposure: number;
+  temperature: number;
+  tint: number;
+  highlights: number;
+  shadows: number;
+  sharpen: number;
+  vignette: number;
+}
+
+export type FilterId =
+  | 'vivid'
+  | 'warm'
+  | 'cool'
+  | 'bw'
+  | 'noir'
+  | 'vintage'
+  | 'film'
+  | 'faded'
+  | 'cinematic'
+  | 'sunset';
+export type EffectId = 'blur' | 'vignette' | 'glitch' | 'rgb-split' | 'pixelate' | 'grain' | 'mirror' | 'shake';
+export type TransitionType =
+  | 'fade'
+  | 'fade-black'
+  | 'fade-white'
+  | 'slide-left'
+  | 'slide-up'
+  | 'wipe-left'
+  | 'zoom'
+  | 'circle'
+  | 'blur';
+
 /** What fills the canvas where the main-track media doesn't cover it. */
 export type CanvasBackground = { type: 'color'; color: string } | { type: 'blur'; amount: number };
 
@@ -136,6 +176,17 @@ export interface Clip {
   crop: Crop;
   /** Ignored for text clips. */
   audio: ClipAudio;
+  /** A look preset; intensity 0 to 1. */
+  filter?: { id: FilterId; intensity: number };
+  /** Manual colour adjustments on top of the filter; missing keys are 0. */
+  adjust?: Partial<Adjustments>;
+  /** A video effect; intensity 0 to 1. */
+  effect?: { id: EffectId; intensity: number };
+  /**
+   * Main track only: transition into the next clip. The next clip starts
+   * `duration` seconds earlier so the two overlap while the transition plays.
+   */
+  transition?: { type: TransitionType; duration: number };
   /** A video clip whose sound was moved to its own audio clip; it plays silently. */
   audioDetached?: boolean;
   /** An audio clip that plays the sound of a video asset (made by detaching audio). */

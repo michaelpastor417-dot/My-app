@@ -1,6 +1,7 @@
 import type { CanvasBackground, Clip, ClipAudio, Crop, TextData, Timeline, Track, Transform } from '../types';
 import { DEFAULT_TRANSFORM, NO_CROP, clampCrop } from '../engine/geometry';
 import { clampAudio } from '../engine/audio';
+import { transitionOverlap } from './transitions';
 import { MAX_SPEED, MIN_SPEED, mediaTimeAt, setValuesAt, transformAt } from './animation';
 
 /**
@@ -39,12 +40,15 @@ export function clipsAt(timeline: Timeline, t: number): Clip[] {
   return timeline.clips.filter((c) => t >= c.start && t < clipEnd(c));
 }
 
-/** Re-lay a magnetic track's clips back to back in the given order, starting at 0. */
+/**
+ * Re-lay a magnetic track's clips back to back in the given order, starting
+ * at 0. A clip with a transition overlaps the next one by the transition's length.
+ */
 function packClips(ordered: Clip[]): Clip[] {
   let cursor = 0;
-  return ordered.map((c) => {
+  return ordered.map((c, i) => {
     const packed = { ...c, start: cursor };
-    cursor += c.duration;
+    cursor += c.duration - transitionOverlap(c, ordered[i + 1]);
     return packed;
   });
 }
@@ -168,8 +172,10 @@ export function splitClip(timeline: Timeline, clipId: string, t: number, newId: 
   const leftIn = clip.reversed ? clip.inPoint + rightDuration * clip.speed : clip.inPoint;
   const rightIn = clip.reversed ? clip.inPoint : clip.inPoint + leftDuration * clip.speed;
   // Fades belong to the clip's outer edges: the left half keeps the fade in, the right the fade out.
+  // The transition belongs to the clip's end, so it moves to the right half.
   const left: Clip = {
     ...clip,
+    transition: undefined,
     inPoint: leftIn,
     duration: leftDuration,
     audio: clampAudio({ ...clip.audio, fadeOut: 0 }, leftDuration),
@@ -404,4 +410,13 @@ export function insertFreezeFrame(
 /** Apply a function to one clip. */
 export function mapClip(timeline: Timeline, clipId: string, fn: (clip: Clip) => Clip): Timeline {
   return { ...timeline, clips: timeline.clips.map((c) => (c.id === clipId ? fn(c) : c)) };
+}
+
+/** Set or clear the transition from a main-track clip into the next one, re-packing the track. */
+export function setTransition(timeline: Timeline, clipId: string, transition: Clip['transition'] | null): Timeline {
+  const clip = timeline.clips.find((c) => c.id === clipId);
+  const track = clip && getTrack(timeline, clip.trackId);
+  if (!clip || !track?.isMain) return timeline;
+  const next = mapClip(timeline, clipId, (c) => ({ ...c, transition: transition ?? undefined }));
+  return replaceTrackClips(next, track.id, packClips(clipsOnTrack(next, track.id)));
 }

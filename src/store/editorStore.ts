@@ -1,5 +1,18 @@
 import { create } from 'zustand';
-import type { CanvasBackground, Clip, MediaAsset, TextData, Timeline, Track, TrackKind } from '../types';
+import type {
+  Adjustments,
+  CanvasBackground,
+  Clip,
+  EffectId,
+  FilterId,
+  MediaAsset,
+  TextData,
+  Timeline,
+  Track,
+  TrackKind,
+  TransitionType,
+} from '../types';
+import { DEFAULT_TRANSITION_DURATION } from '../timeline/transitions';
 import { BASE_TEXT, DEFAULT_TEXT_DURATION } from '../engine/text';
 import { STICKER_TEXT, TEXT_PRESETS } from '../timeline/textPresets';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
@@ -17,6 +30,7 @@ import {
   mapClip,
   setClipSpeed,
   setReversed,
+  setTransition,
   findFreeStart,
   getTrack,
   insertClip,
@@ -55,6 +69,8 @@ interface EditorState {
   currentTime: number;
   isPlaying: boolean;
   selectedClipId: string | null;
+  /** The main-track cut being edited, identified by the clip before it. Exclusive with selectedClipId. */
+  selectedTransitionId: string | null;
   /** Timeline zoom in pixels per second. */
   zoom: number;
   aspectRatio: AspectRatio;
@@ -101,6 +117,18 @@ interface EditorState {
   toggleKeyframe: (clipId: string) => void;
   /** Insert a 3-second still of the frame at the playhead (selected clip, else the main-track clip). */
   freezeFrame: () => void;
+  setFilter: (clipId: string, filter: Clip['filter'] | null, coalesceKey?: string) => void;
+  setAdjustment: (clipId: string, key: keyof Adjustments, value: number) => void;
+  resetAdjustments: (clipId: string) => void;
+  setEffect: (clipId: string, effect: Clip['effect'] | null, coalesceKey?: string) => void;
+  /** Set the transition after main-track clip `clipId` (null removes it). */
+  setTransition: (clipId: string, transition: Clip['transition'] | null, coalesceKey?: string) => void;
+  /** Library clicks: apply to the selected clip, else the main-track clip under the playhead. */
+  applyFilter: (id: FilterId) => void;
+  applyEffect: (id: EffectId) => void;
+  /** Library click: apply to the selected cut, else the main-track cut nearest the playhead. */
+  applyTransition: (type: TransitionType) => void;
+  selectTransition: (clipId: string | null) => void;
 
   /** Begin a live edit (e.g. a trim drag); updates (e.g. `trimGesture`) undo as one step. */
   beginGesture: () => void;
@@ -119,6 +147,24 @@ interface EditorState {
 
 function newTrack(kind: TrackKind): Track {
   return { id: uid(), kind, isMain: false, muted: false, hidden: false, locked: false };
+}
+
+/**
+ * The clip a filter or effect picked from the library applies to: the
+ * selected visual media clip, else the main-track clip under the playhead.
+ */
+export function lookTargetOf(
+  state: Pick<EditorState, 'timeline' | 'assets' | 'selectedClipId' | 'currentTime'>,
+): Clip | undefined {
+  const { timeline, assets, selectedClipId, currentTime } = state;
+  const visualMedia = (c: Clip) =>
+    !c.text &&
+    !c.audioOnly &&
+    assets.find((a) => a.id === c.assetId)?.kind !== 'audio' &&
+    !isClipLocked(timeline, c);
+  const selected = timeline.clips.find((c) => c.id === selectedClipId);
+  if (selected && visualMedia(selected)) return selected;
+  return clipsAt(timeline, currentTime).find((c) => c.trackId === 'main' && visualMedia(c));
 }
 
 export function isClipLocked(timeline: Timeline, clip: Clip): boolean {
@@ -175,9 +221,10 @@ export const useEditor = create<EditorState>((set, get) => {
   }
 
   function afterTimelineChange() {
-    const { timeline, selectedClipId, currentTime } = get();
+    const { timeline, selectedClipId, selectedTransitionId, currentTime } = get();
     set({
       selectedClipId: timeline.clips.some((c) => c.id === selectedClipId) ? selectedClipId : null,
+      selectedTransitionId: timeline.clips.some((c) => c.id === selectedTransitionId) ? selectedTransitionId : null,
       currentTime: Math.min(currentTime, timelineDuration(timeline)),
     });
   }
@@ -212,6 +259,8 @@ export const useEditor = create<EditorState>((set, get) => {
     if (clip && !isClipLocked(timeline, clip)) commit(fn(timeline, clip), {}, coalesceKey && `${clipId}:${coalesceKey}`);
   }
 
+  const lookTarget = () => lookTargetOf(get());
+
   /** Place a clip (new or pasted) on the timeline, choosing its track and position. */
   function place(template: Omit<Clip, 'trackId' | 'start'>, opts: { trackId?: string; at?: number }) {
     const kind = trackKindOf(template);
@@ -228,6 +277,7 @@ export const useEditor = create<EditorState>((set, get) => {
     currentTime: 0,
     isPlaying: false,
     selectedClipId: null,
+    selectedTransitionId: null,
     zoom: 60,
     aspectRatio: '16:9',
     clipboard: null,
@@ -285,7 +335,12 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     deleteSelected: () => {
-      const { selectedClipId, timeline } = get();
+      const { selectedClipId, selectedTransitionId, timeline } = get();
+      if (selectedTransitionId) {
+        get().setTransition(selectedTransitionId, null);
+        set({ selectedTransitionId: null });
+        return;
+      }
       const clip = timeline.clips.find((c) => c.id === selectedClipId);
       if (!clip || isClipLocked(timeline, clip)) return;
       commit(pruneEmptyTracks(removeClip(timeline, clip.id)), { selectedClipId: null });
@@ -348,6 +403,47 @@ export const useEditor = create<EditorState>((set, get) => {
 
     toggleKeyframe: (clipId) => editClip(clipId, (t, clip) => mapClip(t, clipId, (c) => toggleKeyframe(c, editTime(clip)))),
 
+    setFilter: (clipId, filter, coalesceKey) =>
+      editClip(clipId, (t) => mapClip(t, clipId, (c) => ({ ...c, filter: filter ?? undefined })), coalesceKey),
+
+    setAdjustment: (clipId, key, value) =>
+      editClip(clipId, (t) => mapClip(t, clipId, (c) => ({ ...c, adjust: { ...c.adjust, [key]: value } })), `adjust-${key}`),
+
+    resetAdjustments: (clipId) => editClip(clipId, (t) => mapClip(t, clipId, (c) => ({ ...c, adjust: undefined }))),
+
+    setEffect: (clipId, effect, coalesceKey) =>
+      editClip(clipId, (t) => mapClip(t, clipId, (c) => ({ ...c, effect: effect ?? undefined })), coalesceKey),
+
+    setTransition: (clipId, transition, coalesceKey) =>
+      editClip(clipId, (t) => setTransition(t, clipId, transition), coalesceKey),
+
+    applyFilter: (id) => {
+      const target = lookTarget();
+      if (target) get().setFilter(target.id, { id, intensity: target.filter?.intensity ?? 1 });
+    },
+
+    applyEffect: (id) => {
+      const target = lookTarget();
+      if (target) get().setEffect(target.id, { id, intensity: target.effect?.intensity ?? 0.6 });
+    },
+
+    applyTransition: (type) => {
+      const { timeline, selectedTransitionId, currentTime } = get();
+      const main = clipsOnTrack(timeline, 'main');
+      // Cuts are identified by the clip before them; the last clip has no cut after it.
+      const cuts = main.slice(0, -1);
+      const chosen =
+        cuts.find((c) => c.id === selectedTransitionId) ??
+        [...cuts].sort(
+          (a, b) =>
+            Math.abs(a.start + a.duration - currentTime) - Math.abs(b.start + b.duration - currentTime),
+        )[0];
+      if (!chosen) return;
+      const duration = chosen.transition?.duration ?? DEFAULT_TRANSITION_DURATION;
+      get().setTransition(chosen.id, { type, duration });
+      set({ selectedTransitionId: chosen.id, selectedClipId: null });
+    },
+
     freezeFrame: () => {
       const { timeline, currentTime, selectedClipId } = get();
       // The selected clip if it's under the playhead, otherwise the main-track clip there.
@@ -397,7 +493,9 @@ export const useEditor = create<EditorState>((set, get) => {
       afterTimelineChange();
     },
 
-    select: (clipId) => set({ selectedClipId: clipId }),
+    select: (clipId) => set({ selectedClipId: clipId, selectedTransitionId: null }),
+
+    selectTransition: (clipId) => set({ selectedTransitionId: clipId, selectedClipId: null }),
 
     seek: (time) => set({ currentTime: Math.max(0, Math.min(time, timelineDuration(get().timeline))) }),
 

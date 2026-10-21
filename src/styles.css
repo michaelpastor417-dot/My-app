@@ -556,6 +556,49 @@ select {
   accent-color: var(--accent);
 }
 
+.inspector-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-top: 1px solid var(--border);
+}
+.inspector-tabs button {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.inspector-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.transition-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.transition-grid button {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 6px 2px;
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.transition-grid button span {
+  font-size: 18px;
+  color: var(--text);
+}
+.transition-grid button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .keyframe-bar {
   display: flex;
   align-items: center;
@@ -631,6 +674,59 @@ select {
 .text-preset:hover,
 .sticker:hover {
   border-color: var(--accent);
+}
+
+/* ---------- Filters, effects & transitions library ---------- */
+.look-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.look-tile {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.look-thumb,
+.look-icon {
+  aspect-ratio: 16 / 10;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: #2b2b33;
+}
+.look-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.look-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--panel-2);
+}
+.look-icon {
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  color: var(--text);
+}
+.look-tile:hover:not(:disabled) .look-thumb,
+.look-tile:hover:not(:disabled) .look-icon {
+  border-color: var(--border);
+}
+.look-tile.active .look-thumb,
+.look-tile.active .look-icon {
+  border-color: var(--accent);
+}
+.look-tile.active span {
+  color: var(--accent);
 }
 
 /* ---------- Timeline ---------- */
@@ -880,6 +976,43 @@ select {
 .waveform {
   display: block;
   width: 100%;
+}
+.transition-overlap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(45deg, rgba(34, 211, 197, 0.35) 0 4px, rgba(0, 0, 0, 0.25) 4px 8px);
+  pointer-events: none;
+  z-index: 2;
+}
+.transition-marker {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  z-index: 3;
+  opacity: 0.75;
+}
+.transition-marker:hover,
+.transition-marker.has {
+  opacity: 1;
+  color: var(--text);
+}
+.transition-marker.has {
+  border-color: var(--accent);
+}
+.transition-marker.selected {
+  background: var(--accent);
+  color: #001a18;
+  border-color: var(--accent);
 }
 .keyframe-diamond {
   position: absolute;

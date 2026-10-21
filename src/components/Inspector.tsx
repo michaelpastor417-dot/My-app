@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
 import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
 import { formatTime } from '../utils/time';
-import type { CanvasBackground, Clip, ClipAudio, Crop, MediaAsset, TextAnimationIn, TextAnimationOut, TextData } from '../types';
+import type { CanvasBackground, Clip, ClipAudio, Crop, EffectId, FilterId, MediaAsset, TextAnimationIn, TextAnimationOut, TextData } from '../types';
 import { FONT_FAMILIES } from '../engine/text';
+import { ADJUSTMENT_CONTROLS, EFFECTS, FILTERS } from '../timeline/look';
+import { DEFAULT_TRANSITION_DURATION, MAX_TRANSITION_DURATION, TRANSITIONS } from '../timeline/transitions';
 import { MAX_VOLUME } from '../engine/audio';
 import {
   MAX_SPEED,
@@ -190,12 +193,16 @@ export function Inspector() {
   const asset = useEditor((s) => (clip ? s.assets.find((a) => a.id === clip.assetId) : undefined));
   const track = useEditor((s) => (clip ? s.timeline.tracks.find((t) => t.id === clip.trackId) : undefined));
   const locked = useEditor((s) => !!clip && isClipLocked(s.timeline, clip));
+  const transitionClip = useEditor((s) => s.timeline.clips.find((c) => c.id === s.selectedTransitionId));
+  const title = clip ? (clip.text ? 'Text' : 'Clip') : transitionClip ? 'Transition' : 'Canvas';
 
   return (
     <aside className="panel inspector">
-      <div className="panel-title">{clip ? (clip.text ? 'Text' : 'Clip') : 'Canvas'}</div>
+      <div className="panel-title">{title}</div>
       <div className="inspector-body">
-        {!clip ? (
+        {!clip && transitionClip ? (
+          <TransitionSettings clip={transitionClip} />
+        ) : !clip ? (
           <CanvasSettings />
         ) : clip.text ? (
           <>
@@ -235,22 +242,211 @@ export function Inspector() {
               )}
             </dl>
             {locked && <p className="empty-hint">This clip's track is locked.</p>}
-            <fieldset disabled={locked}>
-              <KeyframeBar clip={clip} />
-              {clip.freezeAt !== undefined && <p className="empty-hint">Freeze frame: a still of one moment.</p>}
-              <SpeedSection clip={clip} asset={asset} />
-              <AudioSection clip={clip} asset={asset} />
-              {asset.kind !== 'audio' && !clip.audioOnly && (
-                <>
-                  <TransformSection clip={clip} />
-                  <CropSection clip={clip} />
-                </>
-              )}
-            </fieldset>
+            {clip.freezeAt !== undefined && <p className="empty-hint">Freeze frame: a still of one moment.</p>}
+            <MediaClipTabs clip={clip} asset={asset} locked={locked} />
           </>
         )}
       </div>
     </aside>
+  );
+}
+
+type MediaTab = 'Video' | 'Audio' | 'Speed' | 'Color' | 'Effect';
+
+/** CapCut-style tabs for a media clip's settings; which tabs exist depends on the clip. */
+function MediaClipTabs({ clip, asset, locked }: { clip: Clip; asset: MediaAsset; locked: boolean }) {
+  const visual = asset.kind !== 'audio' && !clip.audioOnly;
+  const hasSound = asset.kind !== 'image' && clip.freezeAt === undefined;
+  const tabs: MediaTab[] = [
+    ...(visual ? (['Video'] as const) : []),
+    ...(hasSound ? (['Audio'] as const) : []),
+    ...(hasSound ? (['Speed'] as const) : []),
+    ...(visual ? (['Color', 'Effect'] as const) : []),
+  ];
+  const [chosen, setChosen] = useState<MediaTab>('Video');
+  const tab = tabs.includes(chosen) ? chosen : tabs[0];
+
+  return (
+    <>
+      <nav className="inspector-tabs">
+        {tabs.map((t) => (
+          <button key={t} className={t === tab ? 'active' : ''} onClick={() => setChosen(t)}>
+            {t}
+          </button>
+        ))}
+      </nav>
+      <fieldset disabled={locked}>
+        {(tab === 'Video' || tab === 'Audio') && <KeyframeBar clip={clip} />}
+        {tab === 'Video' && (
+          <>
+            <TransformSection clip={clip} />
+            <CropSection clip={clip} />
+          </>
+        )}
+        {tab === 'Audio' && <AudioSection clip={clip} asset={asset} />}
+        {tab === 'Speed' && <SpeedSection clip={clip} asset={asset} />}
+        {tab === 'Color' && <ColorSection clip={clip} />}
+        {tab === 'Effect' && <EffectSection clip={clip} />}
+      </fieldset>
+    </>
+  );
+}
+
+function ColorSection({ clip }: { clip: Clip }) {
+  const setFilter = useEditor((s) => s.setFilter);
+  const setAdjustment = useEditor((s) => s.setAdjustment);
+  const resetAdjustments = useEditor((s) => s.resetAdjustments);
+  const filter = clip.filter;
+  return (
+    <>
+      <section className="inspector-section">
+        <header>
+          <h4>Filter</h4>
+          {filter && (
+            <button className="link-btn" onClick={() => setFilter(clip.id, null)}>
+              Remove
+            </button>
+          )}
+        </header>
+        <label className="field select-field">
+          <span>Look</span>
+          <select
+            value={filter?.id ?? ''}
+            onChange={(e) =>
+              setFilter(clip.id, e.target.value ? { id: e.target.value as FilterId, intensity: filter?.intensity ?? 1 } : null)
+            }
+          >
+            <option value="">None</option>
+            {FILTERS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {filter && (
+          <SliderField
+            label="Strength"
+            unit="%"
+            min={0}
+            max={100}
+            value={Math.round(filter.intensity * 100)}
+            onChange={(v) => setFilter(clip.id, { ...filter, intensity: v / 100 }, 'filter-intensity')}
+          />
+        )}
+      </section>
+      <section className="inspector-section">
+        <header>
+          <h4>Adjust</h4>
+          <button className="link-btn" onClick={() => resetAdjustments(clip.id)}>
+            Reset
+          </button>
+        </header>
+        {ADJUSTMENT_CONTROLS.map(({ key, label, min }) => (
+          <SliderField
+            key={key}
+            label={label}
+            unit=""
+            min={min}
+            max={100}
+            value={Math.round(clip.adjust?.[key] ?? 0)}
+            onChange={(v) => setAdjustment(clip.id, key, v)}
+          />
+        ))}
+      </section>
+    </>
+  );
+}
+
+function EffectSection({ clip }: { clip: Clip }) {
+  const setEffect = useEditor((s) => s.setEffect);
+  const effect = clip.effect;
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Effect</h4>
+        {effect && (
+          <button className="link-btn" onClick={() => setEffect(clip.id, null)}>
+            Remove
+          </button>
+        )}
+      </header>
+      <label className="field select-field">
+        <span>Effect</span>
+        <select
+          value={effect?.id ?? ''}
+          onChange={(e) =>
+            setEffect(clip.id, e.target.value ? { id: e.target.value as EffectId, intensity: effect?.intensity ?? 0.6 } : null)
+          }
+        >
+          <option value="">None</option>
+          {EFFECTS.map((fx) => (
+            <option key={fx.id} value={fx.id}>
+              {fx.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {effect && (
+        <SliderField
+          label="Strength"
+          unit="%"
+          min={0}
+          max={100}
+          value={Math.round(effect.intensity * 100)}
+          onChange={(v) => setEffect(clip.id, { ...effect, intensity: v / 100 }, 'effect-intensity')}
+        />
+      )}
+    </section>
+  );
+}
+
+function TransitionSettings({ clip }: { clip: Clip }) {
+  const setTransition = useEditor((s) => s.setTransition);
+  const next = useEditor((s) => {
+    const main = s.timeline.clips.filter((c) => c.trackId === clip.trackId).sort((a, b) => a.start - b.start);
+    return main[main.indexOf(clip) + 1];
+  });
+  const transition = clip.transition;
+  const maxDuration = tenths(Math.min(MAX_TRANSITION_DURATION, clip.duration / 2, (next?.duration ?? 0) / 2));
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Between clips</h4>
+        {transition && (
+          <button className="link-btn" onClick={() => setTransition(clip.id, null)}>
+            Remove
+          </button>
+        )}
+      </header>
+      <div className="transition-grid">
+        {TRANSITIONS.map((t) => (
+          <button
+            key={t.type}
+            className={transition?.type === t.type ? 'active' : ''}
+            onClick={() =>
+              setTransition(clip.id, { type: t.type, duration: transition?.duration ?? DEFAULT_TRANSITION_DURATION })
+            }
+          >
+            <span>{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {transition ? (
+        <SliderField
+          label="Duration"
+          unit="s"
+          min={0.1}
+          max={Math.max(0.1, maxDuration)}
+          step={0.1}
+          value={tenths(Math.min(transition.duration, maxDuration))}
+          onChange={(v) => setTransition(clip.id, { ...transition, duration: v }, 'transition-duration')}
+        />
+      ) : (
+        <p className="section-note">Pick a transition. The next clip will overlap this one while it plays.</p>
+      )}
+    </section>
   );
 }
 
