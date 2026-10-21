@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "desktop": "vite build && electron .",
+    "desktop": "vite build && install-electron && electron .",
     "desktop:package": "vite build && electron-builder"
   },
   "dependencies": {
@@ -71,7 +71,6 @@
       "category": "AudioVideo",
       "syncDesktopName": true
     },
-    "electronDist": "node_modules/electron/dist",
     "electronVersion": "44.6.0"
   },
   "author": "ClipForge contributors",
