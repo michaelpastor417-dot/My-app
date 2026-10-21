@@ -33,6 +33,8 @@ export class PlaybackEngine {
   private audioCtx: AudioContext | null = null;
   private gains = new Map<string, GainNode>();
   private rafId = 0;
+  /** Only the first failing frame is logged, not one error per frame. */
+  private reportedError = false;
   private lastTick = 0;
   private unsubscribe: () => void;
 
@@ -70,11 +72,17 @@ export class PlaybackEngine {
     }
     this.lastTick = now;
 
+    // Schedule the next frame first, so a problem drawing this one can never freeze the player.
+    this.rafId = requestAnimationFrame(this.frame);
     const { timeline, assets, currentTime, isPlaying } = useEditor.getState();
     const active = clipsAt(timeline, currentTime);
-    this.syncMedia(timeline, active, currentTime, isPlaying);
-    this.draw(timeline, assets, active, currentTime);
-    this.rafId = requestAnimationFrame(this.frame);
+    try {
+      this.syncMedia(timeline, active, currentTime, isPlaying);
+      this.draw(timeline, assets, active, currentTime);
+    } catch (error) {
+      if (!this.reportedError) console.error('Preview frame failed:', error);
+      this.reportedError = true;
+    }
   };
 
   /** Create elements for new clips and dispose of ones for deleted clips. */

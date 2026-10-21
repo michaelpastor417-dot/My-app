@@ -17,6 +17,7 @@ beforeEach(() => {
     past: [],
     future: [],
     gestureBase: null,
+    gestureDepth: 0,
     currentTime: 0,
     selectedClipId: null,
     clipboard: null,
@@ -328,5 +329,21 @@ describe('editor store', () => {
     expect(s().timeline.clips[0].removeBackground).toBe(true);
     s().setRemoveBackground(id, false);
     expect(s().timeline.clips[0].removeBackground).toBeUndefined();
+  });
+
+  it('overlapping gestures (move + pinch) undo as a single step', () => {
+    s().addToTimeline('v');
+    const id = s().selectedClipId!;
+    s().beginGesture(); // one finger starts moving
+    s().updateClipLive(id, { transform: { x: 0.1 } });
+    s().beginGesture(); // second finger starts pinching
+    s().updateClipLive(id, { transform: { scale: 1.5 } });
+    s().endGesture(); // pinch ends: still mid-gesture
+    expect(s().past).toHaveLength(1); // only the add
+    s().updateClipLive(id, { transform: { x: 0.2 } });
+    s().endGesture(); // move ends
+    expect(s().timeline.clips[0].transform).toMatchObject({ x: 0.2, scale: 1.5 });
+    s().undo();
+    expect(s().timeline.clips[0].transform).toMatchObject({ x: 0, scale: 1 });
   });
 });

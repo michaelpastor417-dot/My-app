@@ -1238,6 +1238,12 @@ select {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
+.install-btn {
+  margin-left: auto;
+  margin-right: 12px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
 .home-storage {
   color: var(--muted);
   font-size: 12px;
@@ -1454,4 +1460,186 @@ select {
 }
 .ai-message.error {
   color: #ff7b7b;
+}
+
+/* ---------- Phone layout ---------- */
+button {
+  touch-action: manipulation; /* no double-tap zoom on buttons */
+}
+.ruler,
+.transform-overlay,
+.trim-handle {
+  touch-action: none;
+}
+.app.compact {
+  height: 100dvh;
+  grid-template-rows: auto minmax(0, 1fr) minmax(170px, 34dvh) auto;
+}
+.app.compact .desktop-only {
+  display: none;
+}
+.app.compact .topbar {
+  gap: 8px;
+  padding: 0 8px;
+  padding-top: env(safe-area-inset-top);
+}
+.app.compact .project-name-input {
+  width: 40vw;
+}
+.app.compact .save-status {
+  display: none;
+}
+.app.compact .preview {
+  min-height: 0;
+}
+.app.compact .preview-header {
+  padding: 4px 8px;
+}
+.app.compact .preview-stage {
+  padding: 6px;
+}
+.app.compact .preview-controls {
+  padding: 4px 8px;
+}
+.app.compact .track-header .track-name {
+  display: none;
+}
+.app.compact .track-header {
+  padding: 0 4px;
+  gap: 0;
+  justify-content: center;
+}
+.mobile-bar {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.mobile-bar button {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 62px;
+  padding: 6px 4px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.mobile-bar button:active {
+  background: var(--panel-2);
+}
+.mobile-bar-icon {
+  font-size: 18px;
+  line-height: 1.1;
+  color: var(--text);
+}
+.mobile-bar.selection {
+  justify-content: space-around;
+}
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+}
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 68dvh;
+  background: var(--panel);
+  border-radius: 14px 14px 0 0;
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up 0.18s ease-out;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(40px);
+  }
+}
+.sheet-close {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  background: none;
+  border: none;
+}
+.sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-body > .panel {
+  flex: 1;
+  min-height: 0;
+  background: none;
+}
+.sheet-body .media-panel .asset-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.sheet-body .look-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Touch screens: bigger targets, and the "+" on media is always visible (there's no hover). */
+@media (pointer: coarse) {
+  .asset-add {
+    opacity: 1;
+    width: 28px;
+    height: 28px;
+  }
+  .trim-handle {
+    width: 16px;
+  }
+  .scale-handle {
+    width: 20px;
+    height: 20px;
+    margin: -10px;
+  }
+  .rotate-handle {
+    width: 32px;
+    height: 32px;
+    margin-left: -16px;
+    top: -44px;
+  }
+  .track-toggle {
+    padding: 6px 4px;
+    font-size: 13px;
+  }
+  .tool-btn {
+    padding: 8px 10px;
+  }
+  .transition-marker {
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+  }
+}
+@media (max-width: 600px) {
+  .look-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .home-main {
+    padding-top: 16px;
+  }
+  .new-project {
+    height: 90px;
+  }
 }

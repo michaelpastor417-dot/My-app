@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
 import { clipsAt } from '../timeline/model';
 import { angleAround, hitTest, normalizeAngle, rectForClip, snapRotation } from '../engine/geometry';
 import { trackDrag } from '../utils/drag';
 import { transformAt } from '../timeline/animation';
+import { fingerSpan, pinchChange } from '../utils/pinch';
 import type { Clip, Timeline } from '../types';
 
 /** id of the Properties panel's text box, focused when text is double-clicked in the player. */
@@ -38,6 +39,8 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
   const [canvasW, canvasH] = ASPECT_RATIOS[aspectRatio];
   const [guides, setGuides] = useState<{ v: boolean; h: boolean }>({ v: false, h: false });
   const [rotating, setRotating] = useState(false);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  usePinchToTransform(overlayRef);
 
   // Keyframed clips are edited as they appear at the playhead.
   const transformOf = (clip: Clip) => transformAt(clip, currentTime);
@@ -49,18 +52,19 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
   const selectedLocked = !!selected && isClipLocked(timeline, selected);
 
   /** Start a gesture: pause, snapshot for undo, and follow the pointer until release. */
-  function gesture(onMove: (e: PointerEvent) => void, onEnd?: () => void) {
+  function gesture(pointerId: number, onMove: (e: PointerEvent) => void, onEnd?: () => void) {
     const store = useEditor.getState();
     store.setPlaying(false);
     store.beginGesture();
-    trackDrag(onMove, () => {
+    trackDrag(pointerId, onMove, () => {
       onEnd?.();
       useEditor.getState().endGesture();
     });
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if (e.button !== 0) return;
+    // Extra fingers belong to the pinch gesture, not a new selection or drag.
+    if (e.button !== 0 || !e.isPrimary) return;
     const box = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - box.left) / displayScale;
     const py = (e.clientY - box.top) / displayScale;
@@ -86,6 +90,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
     const snapX = CENTER_SNAP_PX / displayScale / canvasW;
     const snapY = CENTER_SNAP_PX / displayScale / canvasH;
     gesture(
+      e.pointerId,
       (ev) => {
         let x = x0 + (ev.clientX - startX) / displayScale / canvasW;
         let y = y0 + (ev.clientY - startY) / displayScale / canvasH;
@@ -106,7 +111,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
     const center = canvasToClient(e.currentTarget, selectedRect.cx, selectedRect.cy);
     const startDist = Math.hypot(e.clientX - center.x, e.clientY - center.y) || 1;
     const scale0 = transformOf(selected).scale;
-    gesture((ev) => {
+    gesture(e.pointerId, (ev) => {
       const dist = Math.hypot(ev.clientX - center.x, ev.clientY - center.y);
       const scale = Math.max(MIN_SCALE, (scale0 * dist) / startDist);
       useEditor.getState().updateClipLive(selected.id, { transform: { scale } });
@@ -121,6 +126,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
     const rotation0 = transformOf(selected).rotation;
     setRotating(true);
     gesture(
+      e.pointerId,
       (ev) => {
         const angle = angleAround(center.x, center.y, ev.clientX, ev.clientY);
         const rotation = normalizeAngle(snapRotation(normalizeAngle(rotation0 + angle - angle0)));
@@ -138,6 +144,7 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
 
   return (
     <div
+      ref={overlayRef}
       className="transform-overlay"
       onPointerDown={onPointerDown}
       onDoubleClick={() => {
@@ -179,4 +186,55 @@ export function TransformOverlay({ displayScale }: { displayScale: number }) {
       )}
     </div>
   );
+}
+
+/**
+ * Two fingers on the player resize (pinch) and rotate (twist) the selected
+ * clip, like CapCut on phones. The whole gesture undoes as one step, together
+ * with any move the first finger makes at the same time.
+ */
+function usePinchToTransform(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const el = ref.current!;
+    let pinch: { clipId: string; start: ReturnType<typeof fingerSpan>; scale: number; rotation: number } | null = null;
+    const span = (e: TouchEvent) =>
+      fingerSpan(
+        { x: e.touches[0].clientX, y: e.touches[0].clientY },
+        { x: e.touches[1].clientX, y: e.touches[1].clientY },
+      );
+    const onStart = (e: TouchEvent) => {
+      const s = useEditor.getState();
+      const clip = s.timeline.clips.find((c) => c.id === s.selectedClipId);
+      if (e.touches.length !== 2 || pinch || !clip || isClipLocked(s.timeline, clip)) return;
+      const { scale, rotation } = transformAt(clip, s.currentTime);
+      s.beginGesture();
+      pinch = { clipId: clip.id, start: span(e), scale, rotation };
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length < 2) return;
+      e.preventDefault();
+      const change = pinchChange(pinch.start, span(e));
+      useEditor.getState().updateClipLive(pinch.clipId, {
+        transform: {
+          scale: Math.max(MIN_SCALE, pinch.scale * change.scale),
+          rotation: normalizeAngle(snapRotation(normalizeAngle(pinch.rotation + change.rotation))),
+        },
+      });
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!pinch || e.touches.length >= 2) return;
+      pinch = null;
+      useEditor.getState().endGesture();
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [ref]);
 }

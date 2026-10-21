@@ -6,11 +6,15 @@ import { TRANSITIONS, transitionOverlap } from '../timeline/transitions';
 import { formatTime } from '../utils/time';
 import { trackDrag } from '../utils/drag';
 import { Waveform } from './Waveform';
+import { useCompactLayout } from '../utils/useCompactLayout';
+import { fingerSpan } from '../utils/pinch';
 import { VoiceoverButton } from './VoiceoverButton';
 import { ASSET_DRAG_TYPE, TEXT_DRAG_TYPE } from './MediaPanel';
 import type { Clip, MediaAsset, Track } from '../types';
 
+/** Width of the track-name column: room for names and buttons on desktop, icons only on phones. */
 const HEADER_WIDTH = 150;
+const COMPACT_HEADER_WIDTH = 64;
 /** Extra empty timeline shown past the last clip so there's room to drop. */
 const TAIL_SECONDS = 30;
 const SNAP_PX = 8;
@@ -76,6 +80,40 @@ export function Timeline() {
   } = useEditor.getState();
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const compact = useCompactLayout();
+  const headerWidth = compact ? COMPACT_HEADER_WIDTH : HEADER_WIDTH;
+
+  // Two-finger pinch zooms the timeline (one finger still scrolls it).
+  useEffect(() => {
+    const el = scrollRef.current!;
+    let start: { distance: number; zoom: number } | null = null;
+    const span = (e: TouchEvent) =>
+      fingerSpan(
+        { x: e.touches[0].clientX, y: e.touches[0].clientY },
+        { x: e.touches[1].clientX, y: e.touches[1].clientY },
+      );
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) start = { distance: span(e).distance, zoom: useEditor.getState().zoom };
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!start || e.touches.length !== 2) return;
+      e.preventDefault();
+      useEditor.getState().setZoom((start.zoom * span(e).distance) / start.distance);
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) start = null;
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
   const [drag, setDrag] = useState<DragState | null>(null);
 
   const duration = timelineDuration(timeline);
@@ -91,14 +129,14 @@ export function Timeline() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !isPlaying) return;
-    const x = HEADER_WIDTH + currentTime * zoom;
-    if (x > el.scrollLeft + el.clientWidth - 40) el.scrollLeft = x - HEADER_WIDTH - 40;
+    const x = headerWidth + currentTime * zoom;
+    if (x > el.scrollLeft + el.clientWidth - 40) el.scrollLeft = x - headerWidth - 40;
   }, [currentTime, isPlaying, zoom]);
 
   function timeFromClientX(clientX: number): number {
     const el = scrollRef.current!;
     const rect = el.getBoundingClientRect();
-    return Math.max(0, (clientX - rect.left + el.scrollLeft - HEADER_WIDTH) / zoom);
+    return Math.max(0, (clientX - rect.left + el.scrollLeft - headerWidth) / zoom);
   }
 
   // ---- Ruler scrubbing ----
@@ -198,6 +236,7 @@ export function Timeline() {
     const edges = snapEdges(clip.id);
 
     trackDrag(
+      e.pointerId,
       (ev) => {
         const raw = edgeTime + (ev.clientX - pointerStartX) / zoom;
         useEditor.getState().trimGesture(clip.id, edge, snap(raw, edges));
@@ -235,22 +274,22 @@ export function Timeline() {
           ↷
         </button>
         <div className="toolbar-divider" />
-        <button className="tool-btn" onClick={splitAtPlayhead} disabled={!hasClips} title="Split at playhead (Ctrl+B)">
+        <button className="tool-btn desktop-only" onClick={splitAtPlayhead} disabled={!hasClips} title="Split at playhead (Ctrl+B)">
           ✂ Split
         </button>
-        <button className="tool-btn" onClick={deleteSelected} disabled={selectedLocked} title="Delete (Del)">
+        <button className="tool-btn desktop-only" onClick={deleteSelected} disabled={selectedLocked} title="Delete (Del)">
           🗑 Delete
         </button>
-        <button className="tool-btn" onClick={duplicateSelected} disabled={selectedLocked} title="Duplicate (Ctrl+D)">
+        <button className="tool-btn desktop-only" onClick={duplicateSelected} disabled={selectedLocked} title="Duplicate (Ctrl+D)">
           ⧉ Duplicate
         </button>
-        <button className="tool-btn" onClick={freezeFrame} disabled={!canFreeze} title="Freeze the frame at the playhead">
+        <button className="tool-btn desktop-only" onClick={freezeFrame} disabled={!canFreeze} title="Freeze the frame at the playhead">
           ❄ Freeze
         </button>
         <div className="toolbar-divider" />
         <VoiceoverButton />
         <div className="toolbar-spacer" />
-        <label className="zoom-control" title="Zoom (Ctrl + scroll)">
+        <label className="zoom-control desktop-only" title="Zoom (Ctrl + scroll)">
           <span>−</span>
           <input
             type="range"
@@ -274,9 +313,9 @@ export function Timeline() {
         }}
         onPointerDown={() => select(null)}
       >
-        <div className="timeline-content" style={{ width: HEADER_WIDTH + contentWidth }}>
+        <div className="timeline-content" style={{ width: headerWidth + contentWidth }}>
           <div className="ruler-row">
-            <div className="track-header ruler-corner" style={{ width: HEADER_WIDTH }} />
+            <div className="track-header ruler-corner" style={{ width: headerWidth }} />
             <div
               className="ruler"
               onPointerDown={(e) => {
@@ -293,11 +332,12 @@ export function Timeline() {
             </div>
           </div>
 
-          <NewTrackZone label="Drop here to add a new track" onDrop={(e) => onDropAsset(e, 'new')} accepts={acceptsAsset} />
+          <NewTrackZone headerWidth={headerWidth} label="Drop here to add a new track" onDrop={(e) => onDropAsset(e, 'new')} accepts={acceptsAsset} />
 
           {timeline.tracks.map((track) => (
             <TrackRow
               key={track.id}
+              headerWidth={headerWidth}
               track={track}
               // Stable DOM order (by id) so edits never move a clip element mid-drag.
               clips={timeline.clips.filter((c) => c.trackId === track.id).sort((a, b) => (a.id < b.id ? -1 : 1))}
@@ -316,9 +356,9 @@ export function Timeline() {
             />
           ))}
 
-          <NewTrackZone label="Drop audio here" onDrop={(e) => onDropAsset(e, 'new')} accepts={acceptsAsset} />
+          <NewTrackZone headerWidth={headerWidth} label="Drop audio here" onDrop={(e) => onDropAsset(e, 'new')} accepts={acceptsAsset} />
 
-          <div className="playhead" style={{ left: HEADER_WIDTH + currentTime * zoom }}>
+          <div className="playhead" style={{ left: headerWidth + currentTime * zoom }}>
             <div className="playhead-head" />
           </div>
         </div>
@@ -328,6 +368,7 @@ export function Timeline() {
 }
 
 function NewTrackZone(props: {
+  headerWidth: number;
   label: string;
   accepts: (e: React.DragEvent) => boolean;
   onDrop: (e: React.DragEvent) => void;
@@ -343,13 +384,14 @@ function NewTrackZone(props: {
         props.onDrop(e);
       }}
     >
-      <div className="track-header" style={{ width: HEADER_WIDTH }} />
+      <div className="track-header" style={{ width: props.headerWidth }} />
       {over && <span className="new-track-label">{props.label}</span>}
     </div>
   );
 }
 
 function TrackRow(props: {
+  headerWidth: number;
   track: Track;
   clips: Clip[];
   assets: MediaAsset[];
@@ -380,7 +422,7 @@ function TrackRow(props: {
         track.hidden ? 'hidden' : ''
       }`}
     >
-      <div className="track-header" style={{ width: HEADER_WIDTH }}>
+      <div className="track-header" style={{ width: props.headerWidth }}>
         <span className="track-name">{label}</span>
         <TrackToggle on={track.locked} onClick={() => toggle(track.id, 'locked')} title={track.locked ? 'Unlock track' : 'Lock track'}>
           {track.locked ? '🔒' : '🔓'}

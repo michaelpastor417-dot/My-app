@@ -30,22 +30,58 @@ async function createSegmenter(delegate: 'GPU' | 'CPU'): Promise<ImageSegmenter>
   );
 }
 
+/**
+ * Create a segmenter and check it can really process a frame: without WebGL
+ * the GPU version can start up fine and only fail on its first image.
+ */
+async function workingSegmenter(delegate: 'GPU' | 'CPU'): Promise<ImageSegmenter> {
+  const candidate = await createSegmenter(delegate);
+  try {
+    const probe = document.createElement('canvas');
+    probe.width = probe.height = 16;
+    probe.getContext('2d')!.fillRect(0, 0, 16, 16);
+    candidate.segment(probe).close();
+    return candidate;
+  } catch (error) {
+    candidate.close();
+    throw error;
+  }
+}
+
 /** Load the model (once). Tries the GPU first and falls back to the CPU. */
 export function ensureSegmenter(): Promise<ImageSegmenter> {
   if (segmenter) return Promise.resolve(segmenter);
   loading ??= (async () => {
     useSegmenterStatus.setState({ status: 'loading', error: undefined });
     try {
-      segmenter = await createSegmenter('GPU').catch(() => createSegmenter('CPU'));
+      segmenter = await workingSegmenter('GPU').catch(() => workingSegmenter('CPU'));
       useSegmenterStatus.setState({ status: 'ready' });
       return segmenter;
     } catch (error) {
       loading = null;
-      useSegmenterStatus.setState({ status: 'failed', error: (error as Error).message });
+      useSegmenterStatus.setState({ status: 'failed', error: explain(error) });
       throw error;
     }
   })();
   return loading;
+}
+
+/** A message people can act on: the usual cause is graphics acceleration being unavailable. */
+function explain(error: unknown): string {
+  const hasWebGl = !!document.createElement('canvas').getContext('webgl2');
+  if (!hasWebGl) {
+    return 'it needs graphics acceleration (WebGL), which is turned off or not supported on this device.';
+  }
+  return (error as Error)?.message ?? String(error);
+}
+
+/** Stop using a model that failed mid-use, and tell the UI why. */
+function disableSegmenter(error: unknown) {
+  console.error('Background removal stopped:', error);
+  segmenter?.close();
+  segmenter = null;
+  loading = null;
+  useSegmenterStatus.setState({ status: 'failed', error: explain(error) });
 }
 
 /** The loaded model, or null (starting the load) if it isn't ready yet. */
@@ -81,7 +117,14 @@ export class BackgroundRemover {
     const model = readySegmenter();
     if (!model) return null;
 
-    const result = model.segment(source);
+    let result: ReturnType<ImageSegmenter['segment']>;
+    try {
+      result = model.segment(source);
+    } catch (error) {
+      // Show the clip unprocessed rather than breaking playback or export.
+      disableSegmenter(error);
+      return null;
+    }
     const confidence = result.confidenceMasks?.[0];
     if (!confidence) {
       result.close();

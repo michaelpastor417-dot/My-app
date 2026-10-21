@@ -100,6 +100,8 @@ export interface EditorState {
   future: Timeline[];
   /** Timeline at the start of an in-progress drag, so the whole drag undoes as one step. */
   gestureBase: Timeline | null;
+  /** Gestures in progress; overlapping ones (e.g. moving and pinching at once) share one undo step. */
+  gestureDepth: number;
 
   addAssets: (assets: MediaAsset[]) => void;
   /** Fill in details found after import, such as the waveform. Not part of undo history. */
@@ -318,6 +320,7 @@ export const useEditor = create<EditorState>((set, get) => {
     past: [],
     future: [],
     gestureBase: null,
+    gestureDepth: 0,
 
     addAssets: (assets) => set((s) => ({ assets: [...s.assets, ...assets] })),
 
@@ -548,7 +551,10 @@ export const useEditor = create<EditorState>((set, get) => {
     setBackground: (background, coalesceKey) =>
       commit(setBackground(get().timeline, background), {}, coalesceKey && `bg:${coalesceKey}`),
 
-    beginGesture: () => set({ gestureBase: get().timeline }),
+    beginGesture: () => {
+      const { gestureBase, gestureDepth, timeline } = get();
+      set({ gestureBase: gestureBase ?? timeline, gestureDepth: gestureDepth + 1 });
+    },
 
     trimGesture: (clipId, edge, time) => {
       const base = get().gestureBase;
@@ -559,9 +565,13 @@ export const useEditor = create<EditorState>((set, get) => {
     },
 
     endGesture: () => {
-      const { gestureBase, timeline, past } = get();
+      const { gestureBase, gestureDepth, timeline, past } = get();
       if (!gestureBase) return;
-      set({ gestureBase: null });
+      if (gestureDepth > 1) {
+        set({ gestureDepth: gestureDepth - 1 });
+        return;
+      }
+      set({ gestureBase: null, gestureDepth: 0 });
       if (gestureBase !== timeline) {
         set({ past: [...past, gestureBase].slice(-HISTORY_LIMIT), future: [] });
         afterTimelineChange();

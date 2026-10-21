@@ -11,6 +11,12 @@ npm test           # timeline model unit tests
 npm run build      # typecheck + production build
 ```
 
+### Install it
+
+- **Web app (any computer or phone):** open the site in Chrome or Edge and click **Install app** on the home screen (or the install icon in the address bar); on iPhone/iPad use Share → *Add to Home Screen*. After the first visit it opens offline.
+- **Desktop app (Windows, Mac, Linux):** `npm run desktop` runs it locally; `npm run desktop:package` builds an installer for the computer you're on into `release/`. To get all three installers, run the **Desktop installers** workflow from the GitHub Actions tab (or push a tag like `v1.0.0`) and download them from the run. Builds are unsigned, so Windows and macOS show a warning the first time.
+- **Phones and tablets:** narrow screens get a mobile layout: player on top, timeline below, and a bottom bar that opens libraries and clip settings as sheets. Pinch the timeline to zoom; on the player, drag with one finger and pinch/twist with two to resize and rotate.
+
 ## Architecture
 
 | Layer | Where | Role |
@@ -28,6 +34,7 @@ npm run build      # typecheck + production build
 | Geometry | `src/engine/geometry.ts` | Where each clip lands on the canvas (transform + crop), hit testing and rotation maths, shared by the renderer and the player's handles. |
 | Projects | `src/projects/*` | IndexedDB storage of project documents and media files, autosave, open/close, import; versioned format with an upgrade hook (tested with fake-indexeddb). |
 | AI | `src/ai/*` | Silence detection and caption timing (pure, tested); Whisper worker; MediaPipe segmenter used by the compositor for background removal. |
+| Platforms | `public/sw.js`, `public/manifest.webmanifest`, `src/pwa.ts`, `electron/main.cjs`, `.github/workflows/desktop.yml` | Offline/installable web app; desktop shell; installer builds. |
 | UI | `src/components/*` | Media panel, player, properties panel, timeline. |
 
 Keyboard shortcuts: Space play/pause · Ctrl+B split · Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo/redo · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · Del delete · ←/→ step a frame (Shift: 1s).
@@ -51,4 +58,4 @@ Timeline rules (matching CapCut):
 - [x] **Step 8: Export.** Frame-accurate MP4 export (480p–4K, 24–60 fps, three quality levels) through the same compositor as the preview; offline audio mix with keyframes, fades, crossfades, reversed audio and pitch-preserving speed changes; progress, cancel, in-dialog playback. H.264/AAC where the browser supports it, otherwise VP9/Opus.
 - [x] **Step 9: Projects.** Home screen with project cards (thumbnail, length, last edited), new / open / rename / duplicate / delete, autosave (with a save indicator) into the browser's IndexedDB, imported media and voiceovers stored once and shared between copies, unused files cleaned up on delete, versioned project format.
 - [x] **Step 10: AI features (on-device).** Auto captions with Whisper running in a Web Worker (model downloaded once from Hugging Face, then cached; runtime served by the app), background removal with MediaPipe's person segmenter (model bundled, works offline; preview and export), and silence removal from the waveform. AI tab plus a Remove background switch in the clip's Video settings.
-- [ ] **Step 11: Platforms.** Desktop (Tauri/Electron) and mobile (Capacitor) packaging, touch UI.
+- [x] **Step 11: Platforms.** Installable offline web app (manifest, service worker, icons, Install button), mobile layout with bottom bar and sheets, touch gestures (pinch-zoom timeline, pinch/twist clips), Electron desktop app (sandboxed, private app:// origin, H.264 export) with a GitHub workflow building Windows/macOS/Linux installers.

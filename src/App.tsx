@@ -6,6 +6,8 @@ import { Inspector } from './components/Inspector';
 import { Timeline } from './components/Timeline';
 import { useEditor } from './store/editorStore';
 import { Home } from './components/Home';
+import { MobileEditor } from './components/MobileEditor';
+import { useCompactLayout } from './utils/useCompactLayout';
 import { startAutosave } from './projects/session';
 
 const FRAME = 1 / 30;
@@ -63,7 +65,9 @@ export function App() {
   useKeyboardShortcuts();
   useEffect(() => startAutosave(), []);
   const inProject = useEditor((s) => s.projectId !== null);
+  const compact = useCompactLayout();
   if (!inProject) return <Home />;
+  if (compact) return <MobileEditor />;
   return (
     <div className="app">
       <TopBar />

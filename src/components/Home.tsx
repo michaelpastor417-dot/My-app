@@ -3,11 +3,22 @@ import type { ProjectSummary } from '../projects/document';
 import { deleteProject, duplicateProject, listProjects, renameProject } from '../projects/repository';
 import { createProject, openProject } from '../projects/session';
 import { formatTime, timeAgo } from '../utils/time';
+import { installApp, useInstallPrompt } from '../pwa';
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
   if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
   return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}
+
+function InstallButton() {
+  const canInstall = useInstallPrompt((s) => s.event !== null);
+  if (!canInstall) return null;
+  return (
+    <button className="btn install-btn" onClick={() => void installApp()} title="Install ClipForge as an app on this device">
+      ⤓ Install app
+    </button>
+  );
 }
 
 /** The start screen: new project, and every saved draft (like CapCut's home). */
@@ -48,6 +59,7 @@ export function Home() {
         <div className="brand">
           <span className="brand-mark">▶</span> ClipForge
         </div>
+        <InstallButton />
         {storage && (
           <span className="home-storage" title="Space this browser lets ClipForge use">
             {formatBytes(storage.usage)} of {formatBytes(storage.quota)} used

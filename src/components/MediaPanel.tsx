@@ -13,10 +13,10 @@ export const ASSET_DRAG_TYPE = 'application/x-clipforge-asset';
 export const TEXT_DRAG_TYPE = 'application/x-clipforge-text';
 
 const TABS = ['Media', 'Audio', 'Text', 'Stickers', 'Effects', 'Transitions', 'Filters', 'AI'] as const;
-type Tab = (typeof TABS)[number];
+export type Tab = (typeof TABS)[number];
 
-export function MediaPanel() {
-  const [tab, setTab] = useState<Tab>('Media');
+export function MediaPanel({ initialTab = 'Media' }: { initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   return (
     <aside className="panel media-panel">
       <nav className="tabs">
