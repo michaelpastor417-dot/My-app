@@ -1,0 +1,43 @@
+# Builds the ClipForge desktop installers on each operating system.
+# Run it from the Actions tab ("Run workflow") or by pushing a tag like v1.0.0.
+# The installers appear as downloadable artifacts on the workflow run.
+name: Desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            files: release/*.exe
+          - os: macos-latest
+            files: release/*.dmg
+          - os: ubuntu-latest
+            files: release/*.AppImage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run desktop:package -- --publish never
+        env:
+          # Unsigned builds; add signing certificates here to remove OS warnings.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipForge-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error

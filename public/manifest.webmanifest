@@ -1,0 +1,17 @@
+{
+  "name": "ClipForge",
+  "short_name": "ClipForge",
+  "description": "A video editor that runs on your device: timeline editing, text, effects, transitions, AI tools and MP4 export.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f0f12",
+  "theme_color": "#18181c",
+  "categories": ["photo", "video", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

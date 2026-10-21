@@ -1,0 +1,79 @@
+{
+  "name": "clipforge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "desktop": "vite build && electron .",
+    "desktop:package": "vite build && electron-builder"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "@mediapipe/tasks-vision": "1.1.0",
+    "mediabunny": "1.61.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "44.6.0",
+    "electron-builder": "26.17.0",
+    "fake-indexeddb": "6.2.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "description": "A CapCut-style video editor that runs on your device.",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "app.clipforge.editor",
+    "productName": "ClipForge",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "icon": "public/icons/icon-1024.png",
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.video",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "ClipForge uses the microphone to record voiceovers."
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo",
+      "syncDesktopName": true
+    },
+    "electronDist": "node_modules/electron/dist",
+    "electronVersion": "44.6.0"
+  },
+  "author": "ClipForge contributors",
+  "desktopName": "clipforge.desktop"
+}

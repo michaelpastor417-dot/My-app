@@ -1,0 +1,788 @@
+import { useState } from 'react';
+import { ASPECT_RATIOS, isClipLocked, useEditor } from '../store/editorStore';
+import { DEFAULT_TRANSFORM, NO_CROP } from '../engine/geometry';
+import { formatTime } from '../utils/time';
+import type { CanvasBackground, Clip, ClipAudio, Crop, EffectId, FilterId, MediaAsset, TextAnimationIn, TextAnimationOut, TextData } from '../types';
+import { FONT_FAMILIES } from '../engine/text';
+import { ADJUSTMENT_CONTROLS, EFFECTS, FILTERS } from '../timeline/look';
+import { DEFAULT_TRANSITION_DURATION, MAX_TRANSITION_DURATION, TRANSITIONS } from '../timeline/transitions';
+import { MAX_VOLUME } from '../engine/audio';
+import {
+  MAX_SPEED,
+  MIN_SPEED,
+  keyframeIndexAt,
+  keyframeTimes,
+  transformAt,
+  volumeAt,
+} from '../timeline/animation';
+import { TEXT_INPUT_ID } from './TransformOverlay';
+import { BackgroundToggle } from './AiTools';
+
+type TextProps = { clip: Clip; text: TextData };
+
+const ANIMATIONS_IN: Record<TextAnimationIn, string> = {
+  none: 'None',
+  fade: 'Fade in',
+  'slide-up': 'Slide up',
+  pop: 'Pop',
+  typewriter: 'Typewriter',
+};
+const ANIMATIONS_OUT: Record<TextAnimationOut, string> = {
+  none: 'None',
+  fade: 'Fade out',
+  'slide-down': 'Slide down',
+  pop: 'Pop',
+};
+
+function useTextUpdater(clip: Clip) {
+  const updateText = useEditor((s) => s.updateText);
+  return (key: string, patch: Partial<TextData>) => updateText(clip.id, patch, key);
+}
+
+function TextSection({ clip, text }: TextProps) {
+  const set = useTextUpdater(clip);
+  return (
+    <section className="inspector-section">
+      <textarea
+        id={TEXT_INPUT_ID}
+        className="text-input"
+        rows={3}
+        value={text.content}
+        placeholder="Enter text"
+        onChange={(e) => set('content', { content: e.target.value })}
+      />
+      <label className="field select-field">
+        <span>Font</span>
+        <select value={text.fontFamily} onChange={(e) => set('font', { fontFamily: e.target.value })}>
+          {FONT_FAMILIES.map((f) => (
+            <option key={f} value={f} style={{ fontFamily: f }}>
+              {f}
+            </option>
+          ))}
+        </select>
+      </label>
+      <SliderField
+        label="Size"
+        unit=""
+        min={8}
+        max={400}
+        value={Math.round(text.fontSize)}
+        onChange={(v) => set('size', { fontSize: v })}
+      />
+      <div className="text-format-row">
+        <input
+          type="color"
+          title="Text colour"
+          value={text.color}
+          onChange={(e) => set('color', { color: e.target.value })}
+        />
+        <div className="segmented">
+          <button className={text.bold ? 'active' : ''} onClick={() => set('bold', { bold: !text.bold })} title="Bold">
+            <b>B</b>
+          </button>
+          <button
+            className={text.italic ? 'active' : ''}
+            onClick={() => set('italic', { italic: !text.italic })}
+            title="Italic"
+          >
+            <i>I</i>
+          </button>
+        </div>
+        <div className="segmented">
+          {(['left', 'center', 'right'] as const).map((align) => (
+            <button
+              key={align}
+              className={text.align === align ? 'active' : ''}
+              onClick={() => set('align', { align })}
+              title={`Align ${align}`}
+            >
+              {{ left: '⇤', center: '≡', right: '⇥' }[align]}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TextStyleSection({ clip, text }: TextProps) {
+  const set = useTextUpdater(clip);
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Style</h4>
+      </header>
+      <div className="color-slider-row">
+        <input
+          type="color"
+          title="Outline colour"
+          value={text.strokeColor}
+          onChange={(e) => set('stroke-color', { strokeColor: e.target.value })}
+        />
+        <SliderField
+          label="Outline"
+          unit="%"
+          min={0}
+          max={30}
+          value={Math.round(text.strokeWidth * 100)}
+          onChange={(v) => set('stroke', { strokeWidth: v / 100 })}
+        />
+      </div>
+      <div className="color-slider-row">
+        <input
+          type="color"
+          title="Background colour"
+          value={text.backgroundColor}
+          onChange={(e) => set('bg-color', { backgroundColor: e.target.value })}
+        />
+        <SliderField
+          label="Box"
+          unit="%"
+          min={0}
+          max={100}
+          value={Math.round(text.backgroundOpacity * 100)}
+          onChange={(v) => set('bg', { backgroundOpacity: v / 100 })}
+        />
+      </div>
+      <label className="checkbox-field">
+        <input type="checkbox" checked={text.shadow} onChange={(e) => set('shadow', { shadow: e.target.checked })} />
+        Shadow
+      </label>
+    </section>
+  );
+}
+
+function AnimationSection({ clip, text }: TextProps) {
+  const set = useTextUpdater(clip);
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Animation</h4>
+      </header>
+      <label className="field select-field">
+        <span>In</span>
+        <select
+          value={text.animationIn}
+          onChange={(e) => set('anim-in', { animationIn: e.target.value as TextAnimationIn })}
+        >
+          {Object.entries(ANIMATIONS_IN).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field select-field">
+        <span>Out</span>
+        <select
+          value={text.animationOut}
+          onChange={(e) => set('anim-out', { animationOut: e.target.value as TextAnimationOut })}
+        >
+          {Object.entries(ANIMATIONS_OUT).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}
+
+export function Inspector() {
+  const clip = useEditor((s) => s.timeline.clips.find((c) => c.id === s.selectedClipId));
+  const asset = useEditor((s) => (clip ? s.assets.find((a) => a.id === clip.assetId) : undefined));
+  const track = useEditor((s) => (clip ? s.timeline.tracks.find((t) => t.id === clip.trackId) : undefined));
+  const locked = useEditor((s) => !!clip && isClipLocked(s.timeline, clip));
+  const transitionClip = useEditor((s) => s.timeline.clips.find((c) => c.id === s.selectedTransitionId));
+  const title = clip ? (clip.text ? 'Text' : 'Clip') : transitionClip ? 'Transition' : 'Canvas';
+
+  return (
+    <aside className="panel inspector">
+      <div className="panel-title">{title}</div>
+      <div className="inspector-body">
+        {!clip && transitionClip ? (
+          <TransitionSettings clip={transitionClip} />
+        ) : !clip ? (
+          <CanvasSettings />
+        ) : clip.text ? (
+          <>
+            <dl className="props">
+              <dt>Start</dt>
+              <dd>{formatTime(clip.start, true)}</dd>
+              <dt>Duration</dt>
+              <dd>{formatTime(clip.duration, true)}</dd>
+            </dl>
+            {locked && <p className="empty-hint">This clip's track is locked.</p>}
+            <fieldset disabled={locked}>
+              <KeyframeBar clip={clip} />
+              <TextSection clip={clip} text={clip.text} />
+              <TextStyleSection clip={clip} text={clip.text} />
+              <AnimationSection clip={clip} text={clip.text} />
+              <TransformSection clip={clip} />
+            </fieldset>
+          </>
+        ) : !asset ? null : (
+          <>
+            <dl className="props">
+              <dt>Name</dt>
+              <dd title={asset.name}>{asset.name}</dd>
+              <dt>Track</dt>
+              <dd>{track?.isMain ? 'Main track' : track?.kind === 'audio' ? 'Audio track' : 'Overlay'}</dd>
+              <dt>Start</dt>
+              <dd>{formatTime(clip.start, true)}</dd>
+              <dt>Duration</dt>
+              <dd>{formatTime(clip.duration, true)}</dd>
+              {asset.width && (
+                <>
+                  <dt>Source</dt>
+                  <dd>
+                    {asset.width}×{asset.height}
+                  </dd>
+                </>
+              )}
+            </dl>
+            {locked && <p className="empty-hint">This clip's track is locked.</p>}
+            {clip.freezeAt !== undefined && <p className="empty-hint">Freeze frame: a still of one moment.</p>}
+            <MediaClipTabs clip={clip} asset={asset} locked={locked} />
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+type MediaTab = 'Video' | 'Audio' | 'Speed' | 'Color' | 'Effect';
+
+/** CapCut-style tabs for a media clip's settings; which tabs exist depends on the clip. */
+function MediaClipTabs({ clip, asset, locked }: { clip: Clip; asset: MediaAsset; locked: boolean }) {
+  const visual = asset.kind !== 'audio' && !clip.audioOnly;
+  const hasSound = asset.kind !== 'image' && clip.freezeAt === undefined;
+  const tabs: MediaTab[] = [
+    ...(visual ? (['Video'] as const) : []),
+    ...(hasSound ? (['Audio'] as const) : []),
+    ...(hasSound ? (['Speed'] as const) : []),
+    ...(visual ? (['Color', 'Effect'] as const) : []),
+  ];
+  const [chosen, setChosen] = useState<MediaTab>('Video');
+  const tab = tabs.includes(chosen) ? chosen : tabs[0];
+
+  return (
+    <>
+      <nav className="inspector-tabs">
+        {tabs.map((t) => (
+          <button key={t} className={t === tab ? 'active' : ''} onClick={() => setChosen(t)}>
+            {t}
+          </button>
+        ))}
+      </nav>
+      <fieldset disabled={locked}>
+        {(tab === 'Video' || tab === 'Audio') && <KeyframeBar clip={clip} />}
+        {tab === 'Video' && (
+          <>
+            <section className="inspector-section">
+              <BackgroundToggle clip={clip} />
+            </section>
+            <TransformSection clip={clip} />
+            <CropSection clip={clip} />
+          </>
+        )}
+        {tab === 'Audio' && <AudioSection clip={clip} asset={asset} />}
+        {tab === 'Speed' && <SpeedSection clip={clip} asset={asset} />}
+        {tab === 'Color' && <ColorSection clip={clip} />}
+        {tab === 'Effect' && <EffectSection clip={clip} />}
+      </fieldset>
+    </>
+  );
+}
+
+function ColorSection({ clip }: { clip: Clip }) {
+  const setFilter = useEditor((s) => s.setFilter);
+  const setAdjustment = useEditor((s) => s.setAdjustment);
+  const resetAdjustments = useEditor((s) => s.resetAdjustments);
+  const filter = clip.filter;
+  return (
+    <>
+      <section className="inspector-section">
+        <header>
+          <h4>Filter</h4>
+          {filter && (
+            <button className="link-btn" onClick={() => setFilter(clip.id, null)}>
+              Remove
+            </button>
+          )}
+        </header>
+        <label className="field select-field">
+          <span>Look</span>
+          <select
+            value={filter?.id ?? ''}
+            onChange={(e) =>
+              setFilter(clip.id, e.target.value ? { id: e.target.value as FilterId, intensity: filter?.intensity ?? 1 } : null)
+            }
+          >
+            <option value="">None</option>
+            {FILTERS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {filter && (
+          <SliderField
+            label="Strength"
+            unit="%"
+            min={0}
+            max={100}
+            value={Math.round(filter.intensity * 100)}
+            onChange={(v) => setFilter(clip.id, { ...filter, intensity: v / 100 }, 'filter-intensity')}
+          />
+        )}
+      </section>
+      <section className="inspector-section">
+        <header>
+          <h4>Adjust</h4>
+          <button className="link-btn" onClick={() => resetAdjustments(clip.id)}>
+            Reset
+          </button>
+        </header>
+        {ADJUSTMENT_CONTROLS.map(({ key, label, min }) => (
+          <SliderField
+            key={key}
+            label={label}
+            unit=""
+            min={min}
+            max={100}
+            value={Math.round(clip.adjust?.[key] ?? 0)}
+            onChange={(v) => setAdjustment(clip.id, key, v)}
+          />
+        ))}
+      </section>
+    </>
+  );
+}
+
+function EffectSection({ clip }: { clip: Clip }) {
+  const setEffect = useEditor((s) => s.setEffect);
+  const effect = clip.effect;
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Effect</h4>
+        {effect && (
+          <button className="link-btn" onClick={() => setEffect(clip.id, null)}>
+            Remove
+          </button>
+        )}
+      </header>
+      <label className="field select-field">
+        <span>Effect</span>
+        <select
+          value={effect?.id ?? ''}
+          onChange={(e) =>
+            setEffect(clip.id, e.target.value ? { id: e.target.value as EffectId, intensity: effect?.intensity ?? 0.6 } : null)
+          }
+        >
+          <option value="">None</option>
+          {EFFECTS.map((fx) => (
+            <option key={fx.id} value={fx.id}>
+              {fx.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {effect && (
+        <SliderField
+          label="Strength"
+          unit="%"
+          min={0}
+          max={100}
+          value={Math.round(effect.intensity * 100)}
+          onChange={(v) => setEffect(clip.id, { ...effect, intensity: v / 100 }, 'effect-intensity')}
+        />
+      )}
+    </section>
+  );
+}
+
+function TransitionSettings({ clip }: { clip: Clip }) {
+  const setTransition = useEditor((s) => s.setTransition);
+  const next = useEditor((s) => {
+    const main = s.timeline.clips.filter((c) => c.trackId === clip.trackId).sort((a, b) => a.start - b.start);
+    return main[main.indexOf(clip) + 1];
+  });
+  const transition = clip.transition;
+  const maxDuration = tenths(Math.min(MAX_TRANSITION_DURATION, clip.duration / 2, (next?.duration ?? 0) / 2));
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Between clips</h4>
+        {transition && (
+          <button className="link-btn" onClick={() => setTransition(clip.id, null)}>
+            Remove
+          </button>
+        )}
+      </header>
+      <div className="transition-grid">
+        {TRANSITIONS.map((t) => (
+          <button
+            key={t.type}
+            className={transition?.type === t.type ? 'active' : ''}
+            onClick={() =>
+              setTransition(clip.id, { type: t.type, duration: transition?.duration ?? DEFAULT_TRANSITION_DURATION })
+            }
+          >
+            <span>{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {transition ? (
+        <SliderField
+          label="Duration"
+          unit="s"
+          min={0.1}
+          max={Math.max(0.1, maxDuration)}
+          step={0.1}
+          value={tenths(Math.min(transition.duration, maxDuration))}
+          onChange={(v) => setTransition(clip.id, { ...transition, duration: v }, 'transition-duration')}
+        />
+      ) : (
+        <p className="section-note">Pick a transition. The next clip will overlap this one while it plays.</p>
+      )}
+    </section>
+  );
+}
+
+/** The playhead held inside the clip: the moment the panel shows and edits. */
+function playheadIn(clip: Clip, time: number): number {
+  return Math.min(Math.max(time, clip.start), clip.start + clip.duration);
+}
+
+/** Previous / add-remove / next keyframe controls, CapCut's ◆ button. */
+function KeyframeBar({ clip }: { clip: Clip }) {
+  const currentTime = useEditor((s) => s.currentTime);
+  const toggleKeyframe = useEditor((s) => s.toggleKeyframe);
+  const seek = useEditor((s) => s.seek);
+  const times = keyframeTimes(clip);
+  const onKeyframe = keyframeIndexAt(clip, playheadIn(clip, currentTime)) >= 0;
+  const inside = currentTime >= clip.start && currentTime <= clip.start + clip.duration;
+  const prev = [...times].reverse().find((t) => t < currentTime - 1e-3);
+  const next = times.find((t) => t > currentTime + 1e-3);
+
+  return (
+    <section className="inspector-section keyframe-bar">
+      <span className="keyframe-label">Keyframes{times.length > 0 && ` · ${times.length}`}</span>
+      <button className="kf-nav" disabled={prev === undefined} onClick={() => seek(prev!)} title="Previous keyframe">
+        ◀
+      </button>
+      <button
+        className={`kf-toggle ${onKeyframe ? 'on' : ''}`}
+        onClick={() => toggleKeyframe(clip.id)}
+        disabled={!inside}
+        title={
+          !inside
+            ? 'Move the playhead onto this clip to add keyframes'
+            : onKeyframe
+              ? 'Remove keyframe'
+              : 'Add keyframe at the playhead'
+        }
+      >
+        ◆
+      </button>
+      <button className="kf-nav" disabled={next === undefined} onClick={() => seek(next!)} title="Next keyframe">
+        ▶
+      </button>
+    </section>
+  );
+}
+
+const SPEED_PRESETS = [0.25, 0.5, 1, 1.5, 2, 4];
+
+function SpeedSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
+  const setSpeed = useEditor((s) => s.setSpeed);
+  const toggleReverse = useEditor((s) => s.toggleReverse);
+  if (asset.kind === 'image' || clip.freezeAt !== undefined) return null;
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Speed</h4>
+        {asset.kind === 'video' && !clip.audioOnly && (
+          <label className="checkbox-field">
+            <input type="checkbox" checked={!!clip.reversed} onChange={() => toggleReverse(clip.id)} />
+            Reverse
+          </label>
+        )}
+      </header>
+      <div className="segmented speed-presets">
+        {SPEED_PRESETS.map((speed) => (
+          <button key={speed} className={clip.speed === speed ? 'active' : ''} onClick={() => setSpeed(clip.id, speed)}>
+            {speed}×
+          </button>
+        ))}
+      </div>
+      <label className="field number-field speed-field">
+        <span>Speed</span>
+        <input
+          type="number"
+          min={MIN_SPEED}
+          max={MAX_SPEED}
+          step={0.1}
+          value={Math.round(clip.speed * 100) / 100}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (e.target.value !== '' && v > 0) setSpeed(clip.id, v, 'speed');
+          }}
+        />
+      </label>
+      <p className="section-note">
+        Duration {formatTime(clip.duration, true)}
+        {clip.reversed && ' · reversed clips are silent in the preview'}
+      </p>
+    </section>
+  );
+}
+
+/** Rounds to one decimal place for display in the fade fields. */
+const tenths = (v: number) => Math.round(v * 10) / 10;
+
+function AudioSection({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
+  const updateClip = useEditor((s) => s.updateClip);
+  const detachAudio = useEditor((s) => s.detachAudio);
+  const volume = useEditor((s) => volumeAt(clip, playheadIn(clip, s.currentTime)));
+  if (asset.kind === 'image' || clip.freezeAt !== undefined) return null;
+  const decoding = asset.peaks === undefined;
+  const silent = asset.peaks?.length === 0;
+  const set = (key: string, audio: Partial<ClipAudio>) => updateClip(clip.id, { audio }, key);
+  const maxFade = tenths(Math.min(10, clip.duration));
+
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Audio</h4>
+        {asset.kind === 'video' && !clip.audioOnly && !clip.audioDetached && !silent && (
+          <button className="link-btn" onClick={() => detachAudio(clip.id)} disabled={decoding}>
+            Detach audio
+          </button>
+        )}
+      </header>
+      {clip.audioDetached ? (
+        <p className="section-note">The sound plays from its own clip on an audio track.</p>
+      ) : silent ? (
+        <p className="section-note">This clip has no sound.</p>
+      ) : (
+        <>
+          <SliderField
+            label="Volume"
+            unit="%"
+            min={0}
+            max={MAX_VOLUME * 100}
+            value={Math.round(volume * 100)}
+            onChange={(v) => set('volume', { volume: v / 100 })}
+          />
+          <SliderField
+            label="Fade in"
+            unit="s"
+            min={0}
+            max={maxFade}
+            step={0.1}
+            value={tenths(clip.audio.fadeIn)}
+            onChange={(v) => set('fade-in', { fadeIn: v })}
+          />
+          <SliderField
+            label="Fade out"
+            unit="s"
+            min={0}
+            max={maxFade}
+            step={0.1}
+            value={tenths(clip.audio.fadeOut)}
+            onChange={(v) => set('fade-out', { fadeOut: v })}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+function TransformSection({ clip }: { clip: Clip }) {
+  const updateClip = useEditor((s) => s.updateClip);
+  const [canvasW, canvasH] = useEditor((s) => ASPECT_RATIOS[s.aspectRatio]);
+  // Select the time, not the transform: interpolated transforms are new objects every call.
+  const currentTime = useEditor((s) => s.currentTime);
+  const t = transformAt(clip, playheadIn(clip, currentTime));
+  const set = (key: string, transform: Partial<Clip['transform']>) => updateClip(clip.id, { transform }, key);
+
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Transform</h4>
+        <button className="link-btn" onClick={() => updateClip(clip.id, { transform: DEFAULT_TRANSFORM })}>
+          Reset
+        </button>
+      </header>
+      <SliderField
+        label="Scale"
+        unit="%"
+        min={5}
+        max={400}
+        value={Math.round(t.scale * 100)}
+        onChange={(v) => set('scale', { scale: v / 100 })}
+      />
+      <div className="field-row">
+        <NumberField
+          label="X"
+          value={Math.round(t.x * canvasW)}
+          onChange={(v) => set('x', { x: v / canvasW })}
+        />
+        <NumberField
+          label="Y"
+          value={Math.round(t.y * canvasH)}
+          onChange={(v) => set('y', { y: v / canvasH })}
+        />
+      </div>
+      <SliderField
+        label="Rotate"
+        unit="°"
+        min={-180}
+        max={180}
+        value={Math.round(t.rotation)}
+        onChange={(v) => set('rotation', { rotation: v })}
+      />
+      <SliderField
+        label="Opacity"
+        unit="%"
+        min={0}
+        max={100}
+        value={Math.round(t.opacity * 100)}
+        onChange={(v) => set('opacity', { opacity: v / 100 })}
+      />
+    </section>
+  );
+}
+
+function CropSection({ clip }: { clip: Clip }) {
+  const updateClip = useEditor((s) => s.updateClip);
+  const sides: (keyof Crop)[] = ['left', 'right', 'top', 'bottom'];
+  return (
+    <section className="inspector-section">
+      <header>
+        <h4>Crop</h4>
+        <button className="link-btn" onClick={() => updateClip(clip.id, { crop: NO_CROP })}>
+          Reset
+        </button>
+      </header>
+      {sides.map((side) => (
+        <SliderField
+          key={side}
+          label={side[0].toUpperCase() + side.slice(1)}
+          unit="%"
+          min={0}
+          max={95}
+          value={Math.round(clip.crop[side] * 100)}
+          onChange={(v) => updateClip(clip.id, { crop: { [side]: v / 100 } }, `crop-${side}`)}
+        />
+      ))}
+    </section>
+  );
+}
+
+function CanvasSettings() {
+  const background = useEditor((s) => s.timeline.background);
+  const setBackground = useEditor((s) => s.setBackground);
+  const aspectRatio = useEditor((s) => s.aspectRatio);
+  const [w, h] = ASPECT_RATIOS[aspectRatio];
+  const choose = (type: CanvasBackground['type']) =>
+    setBackground(type === 'color' ? { type, color: '#000000' } : { type, amount: 0.5 });
+
+  return (
+    <>
+      <dl className="props">
+        <dt>Ratio</dt>
+        <dd>{aspectRatio}</dd>
+        <dt>Size</dt>
+        <dd>
+          {w}×{h}
+        </dd>
+      </dl>
+      <section className="inspector-section">
+        <header>
+          <h4>Background</h4>
+        </header>
+        <div className="segmented">
+          <button className={background.type === 'color' ? 'active' : ''} onClick={() => choose('color')}>
+            Color
+          </button>
+          <button className={background.type === 'blur' ? 'active' : ''} onClick={() => choose('blur')}>
+            Blur
+          </button>
+        </div>
+        {background.type === 'color' ? (
+          <label className="field">
+            <span>Color</span>
+            <input
+              type="color"
+              value={background.color}
+              onChange={(e) => setBackground({ type: 'color', color: e.target.value }, 'color')}
+            />
+          </label>
+        ) : (
+          <SliderField
+            label="Blur"
+            unit="%"
+            min={5}
+            max={100}
+            value={Math.round(background.amount * 100)}
+            onChange={(v) => setBackground({ type: 'blur', amount: v / 100 }, 'blur')}
+          />
+        )}
+      </section>
+      <p className="empty-hint">Select a clip on the timeline or in the player to edit it.</p>
+    </>
+  );
+}
+
+function SliderField(props: {
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="field slider-field">
+      <span>{props.label}</span>
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        value={props.value}
+        onChange={(e) => props.onChange(Number(e.target.value))}
+      />
+      <span className="field-value">
+        <input
+          type="number"
+          step={props.step}
+          value={props.value}
+          onChange={(e) => e.target.value !== '' && props.onChange(Number(e.target.value))}
+        />
+        {props.unit}
+      </span>
+    </label>
+  );
+}
+
+function NumberField(props: { label: string; value: number; onChange: (value: number) => void }) {
+  return (
+    <label className="field number-field">
+      <span>{props.label}</span>
+      <input
+        type="number"
+        value={props.value}
+        onChange={(e) => e.target.value !== '' && props.onChange(Number(e.target.value))}
+      />
+    </label>
+  );
+}
